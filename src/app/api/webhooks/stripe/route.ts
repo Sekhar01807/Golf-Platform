@@ -28,26 +28,28 @@ export async function POST(request: NextRequest) {
 
   const supabase = createAdminClient();
 
-  // ── 1. Webhook Idempotency Check ──
+  // ── 1. Atomic Webhook Idempotency (Insert-First closes concurrent race windows) ──
   try {
-    const { data: existingEvent } = await supabase
+    const { error: insertError } = await supabase
       .from('stripe_events')
-      .select('id')
-      .eq('id', event.id)
-      .single();
+      .insert({
+        id: event.id,
+        event_type: event.type,
+      });
 
-    if (existingEvent) {
-      // Event has already been processed idempotently
-      return NextResponse.json({ received: true, idempotent: true });
+    if (insertError) {
+      // PostgreSQL code 23505 = unique_violation on PRIMARY KEY (event.id)
+      if (
+        insertError.code === '23505' ||
+        insertError.message?.toLowerCase().includes('duplicate') ||
+        insertError.message?.toLowerCase().includes('unique')
+      ) {
+        return NextResponse.json({ received: true, duplicate: true });
+      }
+      console.warn('Stripe idempotency insert warning:', insertError);
     }
-
-    // Record incoming event in stripe_events
-    await supabase.from('stripe_events').insert({
-      id: event.id,
-      event_type: event.type,
-    });
   } catch (dbErr) {
-    console.warn('Stripe idempotency table check warning:', dbErr);
+    console.warn('Stripe idempotency check warning:', dbErr);
   }
 
   // ── 2. Handle Stripe Event Types ──
