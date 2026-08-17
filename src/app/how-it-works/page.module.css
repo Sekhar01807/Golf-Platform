@@ -1,0 +1,116 @@
+.page {
+  padding-bottom: var(--space-3xl);
+}
+
+.hero {
+  padding: var(--space-4xl) 0 var(--space-2xl);
+  text-align: center;
+  background: var(--color-bg);
+}
+
+.badge {
+  display: inline-flex;
+  padding: 0.35rem 1rem;
+  background: #FFFFFF;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--color-primary);
+  margin-bottom: var(--space-md);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.title {
+  font-size: clamp(2.2rem, 4.5vw, 3.2rem);
+  font-weight: 700;
+  color: var(--color-text-primary);
+  margin-bottom: var(--space-md);
+  letter-spacing: -0.02em;
+}
+
+.highlight {
+  color: var(--color-primary);
+}
+
+.subtitle {
+  color: var(--color-text-secondary);
+  font-size: 1.15rem;
+  max-width: 680px;
+  margin: 0 auto;
+  line-height: 1.65;
+}
+
+.stepsGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-xl);
+}
+
+.stepCard {
+  background: #FFFFFF;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-xl);
+  box-shadow: var(--shadow-sm);
+  display: flex;
+  flex-direction: column;
+}
+
+.stepIcon {
+  font-size: 2rem;
+  margin-bottom: var(--space-md);
+}
+
+.stepNum {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--color-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 0.25rem;
+}
+
+.stepTitle {
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: var(--color-text-primary);
+  margin-bottom: var(--space-sm);
+}
+
+.stepDesc {
+  font-size: 0.925rem;
+  color: var(--color-text-secondary);
+  line-height: 1.6;
+}
+
+.tableSection {
+  background: #FFFFFF;
+  border-top: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.sectionTitle {
+  text-align: center;
+  font-size: 2rem;
+  font-weight: 700;
+  color: var(--color-text-primary);
+  margin-bottom: 0.5rem;
+}
+
+.sectionSub {
+  text-align: center;
+  color: var(--color-text-secondary);
+  font-size: 1rem;
+  max-width: 600px;
+  margin: 0 auto var(--space-2xl);
+}
+
+@media (max-width: 900px) {
+  .stepsGrid { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (max-width: 600px) {
+  .stepsGrid { grid-template-columns: 1fr; }
+}

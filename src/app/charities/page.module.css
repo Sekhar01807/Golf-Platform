@@ -1,0 +1,144 @@
+.page {
+  padding-bottom: var(--space-4xl);
+}
+
+.hero {
+  padding: var(--space-4xl) 0 var(--space-2xl);
+  text-align: center;
+  background: var(--color-bg);
+}
+
+.heroBadge {
+  display: inline-flex;
+  padding: 0.35rem 1rem;
+  background: #FFFFFF;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--color-primary);
+  margin-bottom: var(--space-md);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.title {
+  font-size: clamp(2.2rem, 4.5vw, 3.2rem);
+  font-weight: 700;
+  color: var(--color-text-primary);
+  margin-bottom: var(--space-md);
+  letter-spacing: -0.02em;
+}
+
+.highlight {
+  color: var(--color-primary);
+}
+
+.subtitle {
+  color: var(--color-text-secondary);
+  font-size: 1.15rem;
+  max-width: 650px;
+  margin: 0 auto;
+  line-height: 1.65;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-xl);
+}
+
+.charityCard {
+  background: #FFFFFF;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  transition: all var(--transition-normal);
+}
+
+.charityCard:hover {
+  transform: translateY(-4px);
+  border-color: var(--color-secondary);
+  box-shadow: var(--shadow-hover);
+}
+
+.imageContainer {
+  position: relative;
+  width: 100%;
+  height: 200px;
+  background: var(--color-bg-elevated);
+}
+
+.featuredBadge {
+  position: absolute;
+  top: var(--space-md);
+  right: var(--space-md);
+}
+
+.cardContent {
+  padding: var(--space-xl);
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
+.charityName {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--color-text-primary);
+  margin-bottom: 0.5rem;
+}
+
+.charityDesc {
+  font-size: 0.925rem;
+  color: var(--color-text-secondary);
+  line-height: 1.65;
+  margin-bottom: var(--space-lg);
+  flex: 1;
+}
+
+.contributedMetric {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  background: var(--color-bg);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border-subtle);
+  margin-bottom: var(--space-sm);
+}
+
+.metricLabel {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+}
+
+.metricValue {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--color-primary);
+}
+
+.eventBadge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.825rem;
+  color: var(--color-secondary);
+  font-weight: 500;
+  margin-top: var(--space-xs);
+}
+
+@media (max-width: 1024px) {
+  .grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (max-width: 640px) {
+  .grid { grid-template-columns: 1fr; }
+}

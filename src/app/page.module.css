@@ -1,0 +1,323 @@
+.hero {
+  position: relative;
+  padding: var(--space-4xl) 0 var(--space-3xl);
+  background: var(--color-bg);
+  text-align: center;
+}
+
+.heroContent {
+  max-width: 860px;
+  margin: 0 auto;
+}
+
+.heroTag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 1.15rem;
+  background: #FFFFFF;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+  font-size: 0.825rem;
+  font-weight: 600;
+  color: var(--color-primary);
+  box-shadow: var(--shadow-xs);
+  margin-bottom: var(--space-xl);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.heroTitle {
+  font-size: clamp(2.4rem, 5.5vw, 4.2rem);
+  font-weight: 700;
+  line-height: 1.15;
+  color: var(--color-text-primary);
+  margin-bottom: var(--space-lg);
+  letter-spacing: -0.03em;
+}
+
+.heroTitle span {
+  color: var(--color-primary);
+}
+
+.heroDesc {
+  font-size: 1.2rem;
+  color: var(--color-text-secondary);
+  line-height: 1.65;
+  margin-bottom: var(--space-2xl);
+  max-width: 620px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.heroCTA {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: var(--space-3xl);
+}
+
+.heroImageFrame {
+  position: relative;
+  max-width: 1060px;
+  margin: 0 auto;
+  height: 440px;
+  border-radius: var(--radius-xl);
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  box-shadow: var(--shadow-lg);
+  background: #FFFFFF;
+}
+
+/* ── How It Works ── */
+.howSection {
+  background: #FFFFFF;
+  border-top: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.sectionHeader {
+  text-align: center;
+  max-width: 680px;
+  margin: 0 auto var(--space-3xl);
+}
+
+.sectionPretitle {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--color-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-bottom: var(--space-xs);
+}
+
+.sectionTitle {
+  font-size: clamp(1.85rem, 3.5vw, 2.6rem);
+  font-weight: 700;
+  color: var(--color-text-primary);
+  margin-bottom: var(--space-sm);
+  letter-spacing: -0.02em;
+}
+
+.sectionSubtitle {
+  color: var(--color-text-secondary);
+  font-size: 1.05rem;
+  line-height: 1.6;
+}
+
+.stepsGrid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--space-lg);
+}
+
+.stepCard {
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-xl) var(--space-lg);
+  text-align: left;
+  transition: all var(--transition-normal);
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.stepCard:hover {
+  background: #FFFFFF;
+  border-color: var(--color-secondary);
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-md);
+}
+
+.stepNumber {
+  font-family: var(--font-primary);
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--color-primary);
+  margin-bottom: var(--space-md);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.stepTitle {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--color-text-primary);
+  margin-bottom: var(--space-xs);
+}
+
+.stepDesc {
+  font-size: 0.9rem;
+  color: var(--color-text-secondary);
+  line-height: 1.6;
+}
+
+/* ── Charities Showcase ── */
+.charitiesSection {
+  background: var(--color-bg);
+}
+
+.charityGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-xl);
+}
+
+.charityCard {
+  background: #FFFFFF;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+  transition: all var(--transition-normal);
+  display: flex;
+  flex-direction: column;
+}
+
+.charityCard:hover {
+  transform: translateY(-4px);
+  border-color: var(--color-secondary);
+  box-shadow: var(--shadow-hover);
+}
+
+.charityImageFrame {
+  position: relative;
+  width: 100%;
+  height: 200px;
+  background: var(--color-bg-elevated);
+}
+
+.charityBody {
+  padding: var(--space-lg);
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
+.charityName {
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: var(--color-text-primary);
+  margin-bottom: 0.4rem;
+}
+
+.charityDesc {
+  font-size: 0.9rem;
+  color: var(--color-text-secondary);
+  line-height: 1.6;
+  margin-bottom: var(--space-lg);
+  flex: 1;
+}
+
+.charityFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: var(--space-md);
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+.charityRaised {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--color-primary);
+}
+
+.charityLink {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--color-primary);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.charityLink:hover {
+  color: var(--color-primary-hover);
+  text-decoration: underline;
+}
+
+/* ── Stats Strip ── */
+.statsSection {
+  background: #FFFFFF;
+  border-top: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
+  padding: var(--space-3xl) 0;
+}
+
+.statsGrid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--space-xl);
+}
+
+.statItem {
+  text-align: center;
+  padding: var(--space-md);
+}
+
+.statItem .statValue {
+  font-family: var(--font-primary);
+  font-size: 2.4rem;
+  font-weight: 700;
+  color: var(--color-primary);
+  margin-bottom: 4px;
+}
+
+.statItem .statLabel {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* ── CTA Banner ── */
+.ctaSection {
+  padding: var(--space-4xl) 0;
+  text-align: center;
+}
+
+.ctaBox {
+  background: #FFFFFF;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xl);
+  padding: var(--space-3xl) var(--space-2xl);
+  max-width: 820px;
+  margin: 0 auto;
+  box-shadow: var(--shadow-md);
+}
+
+.ctaTitle {
+  font-size: clamp(1.8rem, 3.5vw, 2.5rem);
+  font-weight: 700;
+  color: var(--color-text-primary);
+  margin-bottom: var(--space-sm);
+}
+
+.ctaDesc {
+  color: var(--color-text-secondary);
+  font-size: 1.1rem;
+  max-width: 560px;
+  margin: 0 auto var(--space-2xl);
+  line-height: 1.6;
+}
+
+@media (max-width: 1024px) {
+  .stepsGrid { grid-template-columns: repeat(2, 1fr); }
+  .charityGrid { grid-template-columns: repeat(2, 1fr); }
+  .statsGrid { grid-template-columns: repeat(2, 1fr); }
+  .heroImageFrame { height: 320px; }
+}
+
+@media (max-width: 640px) {
+  .stepsGrid { grid-template-columns: 1fr; }
+  .charityGrid { grid-template-columns: 1fr; }
+  .statsGrid { grid-template-columns: 1fr; }
+  .heroImageFrame { height: 220px; }
+  .ctaBox { padding: var(--space-xl) var(--space-md); }
+}

@@ -1,0 +1,123 @@
+'use client';
+
+import { useState } from 'react';
+import Link from 'next/link';
+import { createClient } from '@/lib/supabase/client';
+import styles from '../auth.module.css';
+
+export default function SignupPage() {
+  const [fullName, setFullName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState(false);
+  const supabase = createClient();
+
+  const handleSignup = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setError('');
+
+    const { error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: {
+          full_name: fullName,
+        },
+      },
+    });
+
+    if (error) {
+      setError(error.message);
+      setLoading(false);
+      return;
+    }
+
+    setSuccess(true);
+    setLoading(false);
+  };
+
+  if (success) {
+    return (
+      <div className={styles.authPage}>
+        <div className={styles.authCard}>
+          <div className={styles.authHeader}>
+            <div className={styles.authBadge}>📩</div>
+            <h1>Check Your Email</h1>
+            <p>
+              We have dispatched a confirmation link to <strong>{email}</strong>.
+              Click the link to verify your account and begin tracking your impact.
+            </p>
+          </div>
+          <Link href="/auth/login" className="btn btn-primary" style={{ width: '100%', textAlign: 'center' }}>
+            Go to Sign In
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className={styles.authPage}>
+      <div className={styles.authCard}>
+        <div className={styles.authHeader}>
+          <div className={styles.authBadge}>⛳</div>
+          <h1>Join GolfForGood</h1>
+          <p>Create your membership and fund vital charities</p>
+        </div>
+
+        {error && <div className="alert alert-error">{error}</div>}
+
+        <form onSubmit={handleSignup} className={styles.authForm}>
+          <div className="form-group">
+            <label className="form-label" htmlFor="fullName">Full Name</label>
+            <input
+              id="fullName"
+              type="text"
+              className="form-input"
+              placeholder="Sekhar V."
+              value={fullName}
+              onChange={(e) => setFullName(e.target.value)}
+              required
+            />
+          </div>
+          <div className="form-group">
+            <label className="form-label" htmlFor="email">Email Address</label>
+            <input
+              id="email"
+              type="email"
+              className="form-input"
+              placeholder="you@domain.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+            />
+          </div>
+          <div className="form-group">
+            <label className="form-label" htmlFor="password">Password</label>
+            <input
+              id="password"
+              type="password"
+              className="form-input"
+              placeholder="Min 6 characters"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+              minLength={6}
+            />
+          </div>
+          <button type="submit" className="btn btn-primary" disabled={loading} style={{ width: '100%', marginTop: 'var(--space-sm)' }}>
+            {loading ? 'Creating Membership...' : 'Create Account'}
+          </button>
+        </form>
+
+        <p className={styles.authFooter}>
+          Already have an account?{' '}
+          <Link href="/auth/login">Sign in</Link>
+        </p>
+      </div>
+    </div>
+  );
+}
