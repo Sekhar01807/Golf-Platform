@@ -95,10 +95,9 @@ export function calculatePrizePoolDistribution(
 
 /**
  * Simulates a monthly draw:
- * 1. Collects all active subscribers.
- * 2. Collects recent scores for each subscriber (creating draw entries).
- * 3. Generates verified winning numbers.
- * 4. Evaluates entries and allocates tier prizes.
+ * 1. Collects active subscribers who have logged exactly 5 scores (strictly eligible).
+ * 2. Generates verified winning numbers.
+ * 3. Evaluates entries and allocates tier prizes.
  */
 export async function simulateMonthlyDraw(
   drawMonth: string,
@@ -106,7 +105,7 @@ export async function simulateMonthlyDraw(
 ): Promise<DrawSimulationResult> {
   const supabase = createAdminClient();
 
-  // 1. Fetch eligible active subscribers
+  // 1. Fetch active subscribers
   const { data: subscribers, error: subError } = await supabase
     .from('users')
     .select('id, full_name, email')
@@ -116,7 +115,7 @@ export async function simulateMonthlyDraw(
 
   const activeUsers = subscribers || [];
 
-  // Estimated prize pool: ₹200 per active subscriber allocated to the draw prize pool
+  // Estimated prize pool: ₹200 per active subscriber allocated to the draw prize pool (min ₹10,000)
   const basePrizePool = Math.max(activeUsers.length * 200, 10000);
 
   // Check if draw for this month already exists
@@ -163,11 +162,11 @@ export async function simulateMonthlyDraw(
     drawId = newDraw.id;
   }
 
-  // 2. Fetch or create entries for eligible subscribers
+  // 2. Evaluate only strictly eligible members (must have 5 logged rounds)
   const rawWinners: { userId: string; matchType: MatchType; matchCount: number; entryNumbers: number[] }[] = [];
+  let eligibleCount = 0;
 
   for (const user of activeUsers) {
-    // Get user's 5 latest golf scores
     const { data: scores } = await supabase
       .from('golf_scores')
       .select('score')
@@ -175,16 +174,13 @@ export async function simulateMonthlyDraw(
       .order('date_played', { ascending: false })
       .limit(5);
 
-    let entryNumbers: number[] = (scores || []).map(s => s.score);
-
-    // Fallback: If user has fewer than 5 scores, fill with deterministic numbers based on user ID
-    if (entryNumbers.length < 5) {
-      const needed = 5 - entryNumbers.length;
-      for (let i = 0; i < needed; i++) {
-        const fakeScore = ((user.id.charCodeAt(i % user.id.length) + (i * 7)) % 45) + 1;
-        entryNumbers.push(fakeScore);
-      }
+    // Business Rule: Member must have logged 5 valid scores to be entered into the draw
+    if (!scores || scores.length < 5) {
+      continue;
     }
+
+    eligibleCount++;
+    const entryNumbers: number[] = scores.map(s => s.score);
 
     // Upsert draw entry
     await supabase.from('draw_entries').upsert({
@@ -232,7 +228,7 @@ export async function simulateMonthlyDraw(
     drawId,
     drawMonth,
     winningNumbers,
-    eligibleSubscribersCount: activeUsers.length,
+    eligibleSubscribersCount: eligibleCount,
     winners: evaluatedWinners,
     prizeBreakdown,
   };
@@ -240,7 +236,7 @@ export async function simulateMonthlyDraw(
 
 /**
  * Transitions a draw from simulated to published:
- * Generates verified winners table entries and publishes results.
+ * Uses the authoritative simulated numbers and stored draw entries without recalculating or regenerating winning numbers.
  */
 export async function publishDraw(drawId: string, actorId?: string): Promise<{ success: boolean; winnersCount: number }> {
   const supabase = createAdminClient();
@@ -254,22 +250,59 @@ export async function publishDraw(drawId: string, actorId?: string): Promise<{ s
   if (drawError || !draw) throw new Error('Draw not found');
   if (draw.status === 'locked') throw new Error('Cannot publish a locked draw');
 
-  // Re-run simulation to get exact evaluated winners
-  const simulation = await simulateMonthlyDraw(draw.draw_month, draw.draw_logic);
+  const winningNumbers: number[] = draw.winning_numbers || [];
+  if (winningNumbers.length !== 5) {
+    throw new Error('Draw does not have valid 5 winning numbers. Please simulate first.');
+  }
+
+  // Fetch persisted draw entries for this draw
+  const { data: entries, error: entriesError } = await supabase
+    .from('draw_entries')
+    .select('user_id, entry_numbers')
+    .eq('draw_id', drawId);
+
+  if (entriesError) throw new Error(`Failed to load draw entries: ${entriesError.message}`);
+
+  const rawWinners: { userId: string; matchType: MatchType; matchCount: number }[] = [];
+
+  for (const entry of (entries || [])) {
+    const evaluation = evaluateEntry(entry.entry_numbers || [], winningNumbers);
+    if (evaluation.matchType) {
+      rawWinners.push({
+        userId: entry.user_id,
+        matchType: evaluation.matchType,
+        matchCount: evaluation.matchCount,
+      });
+    }
+  }
+
+  const tierCounts = {
+    '5-match': rawWinners.filter(w => w.matchType === '5-match').length,
+    '4-match': rawWinners.filter(w => w.matchType === '4-match').length,
+    '3-match': rawWinners.filter(w => w.matchType === '3-match').length,
+  };
+
+  const prizeBreakdown = calculatePrizePoolDistribution(Number(draw.total_prize_pool || 10000), tierCounts);
 
   // Clear previous winners if re-publishing
   await supabase.from('draw_winners').delete().eq('draw_id', drawId);
 
-  // Insert verified winners
-  if (simulation.winners.length > 0) {
-    const winnerRecords = simulation.winners.map(w => ({
-      draw_id: drawId,
-      user_id: w.userId,
-      match_type: w.matchType,
-      prize_amount: w.prizeAmount,
-      verification_status: 'pending',
-      payout_status: 'pending',
-    }));
+  if (rawWinners.length > 0) {
+    const winnerRecords = rawWinners.map(w => {
+      let prize = 0;
+      if (w.matchType === '5-match') prize = prizeBreakdown.tier5Match.individualPrize;
+      else if (w.matchType === '4-match') prize = prizeBreakdown.tier4Match.individualPrize;
+      else if (w.matchType === '3-match') prize = prizeBreakdown.tier3Match.individualPrize;
+
+      return {
+        draw_id: drawId,
+        user_id: w.userId,
+        match_type: w.matchType,
+        prize_amount: prize,
+        verification_status: 'pending',
+        payout_status: 'pending',
+      };
+    });
 
     const { error: insertError } = await supabase
       .from('draw_winners')
@@ -284,8 +317,6 @@ export async function publishDraw(drawId: string, actorId?: string): Promise<{ s
     .update({
       status: 'published',
       published_at: new Date().toISOString(),
-      total_prize_pool: simulation.prizeBreakdown.totalPrizePool,
-      winning_numbers: simulation.winningNumbers,
     })
     .eq('id', drawId);
 
@@ -296,12 +327,12 @@ export async function publishDraw(drawId: string, actorId?: string): Promise<{ s
     targetId: drawId,
     details: {
       drawMonth: draw.draw_month,
-      winnersCount: simulation.winners.length,
-      prizePool: simulation.prizeBreakdown.totalPrizePool,
+      winnersCount: rawWinners.length,
+      prizePool: draw.total_prize_pool,
     },
   });
 
-  return { success: true, winnersCount: simulation.winners.length };
+  return { success: true, winnersCount: rawWinners.length };
 }
 
 /**

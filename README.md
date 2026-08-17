@@ -63,7 +63,7 @@ sequenceDiagram
     Member->>UI: Logs Stableford Score (e.g. 38 pts)
     UI->>API: POST /api/scores { score: 38, date: "2026-08-17" }
     API->>DB: RPC add_golf_score() [Enforces strict 5-score FIFO]
-    Note over API,DB: Server Draw Engine runs monthly draw
+    Note over API,DB: Server Draw Engine evaluates strictly authentic 5-score members
     API->>DB: Matches 5 score numbers against drawn numbers
     API->>DB: Calculates 40% (5-match), 35% (4-match), 25% (3-match)
     DB-->>UI: Displays Member Winnings & Verification Queue
@@ -168,7 +168,7 @@ erDiagram
 4. **Stripe Webhook Idempotency (`stripe_events`)**:
    - Every incoming Stripe event is checked against the `stripe_events` table before processing, preventing duplicate execution and replay vulnerabilities.
 5. **Transactional 5-Score FIFO Limit (`add_golf_score`)**:
-   - Stableford score insertions are bounded by PostgreSQL logic ensuring that only the 5 most recent scores are active per user.
+   - Stableford score insertions are bounded by PostgreSQL logic ensuring that only the 5 most recent scores are active per user. Unsafe non-atomic application fallbacks are eliminated.
 6. **Input Validation**:
    - All API endpoints validate payloads with strict schema validators (checking integers, ranges, future dates, UUIDs, and whitelisted enum plans).
 
@@ -176,14 +176,15 @@ erDiagram
 
 ## 🎰 Draw Engine & Prize Pool Mechanics
 
+- **Authentic Eligibility**: Only active subscribers who have logged all 5 valid rounds enter the draw (no fabricated or placeholder numbers).
 - **Winning Numbers Generation**: Generates 5 distinct random numbers between 1 and 45 (Stableford scale).
 - **Match Tiers**:
   - **5-Number Match (Jackpot)**: Allocated **40%** of the prize pool (rolls over if 0 winners).
   - **4-Number Match**: Allocated **35%** of the prize pool (split equally among tier winners).
   - **3-Number Match**: Allocated **25%** of the prize pool (split equally among tier winners).
-- **Lifecycle & Immutability**:
+- **Authoritative Simulation & Lifecycle**:
   $$\text{SIMULATED} \longrightarrow \text{PUBLISHED} \longrightarrow \text{LOCKED (Immutable)}$$
-  Once locked, winning numbers, prize distributions, and winners cannot be modified by any user or administrator.
+  The persisted simulation result is authoritative. Once published, the exact numbers and winners reviewed by the administrator are committed without re-rolling. Once locked, the draw is permanently frozen.
 
 ---
 
@@ -207,7 +208,7 @@ erDiagram
 - Stripe test account keys
 
 ### 2. Environment Configuration
-Create `.env.local` in the root directory:
+Create `.env.local` in the root directory (see `.env.example`):
 
 ```env
 # Supabase Configuration
@@ -250,6 +251,7 @@ npm test
 ```
 
 ### Test Suites Included:
+- **`src/__tests__/security-regression.test.ts`**: Complete 10-point regression suite covering role escalation blocking, subscription mutation guards, payout protection, non-admin API rejection, locked draw immutability, future date rejection, strict 5-score FIFO, webhook idempotency, and atomic donation ledger sync.
 - **`src/__tests__/validations.test.ts`**: Score constraints (1–45), date formats, future date rejection, checkout plan whitelisting, donation UUID & bounds.
 - **`src/__tests__/draw.service.test.ts`**: Winning number uniqueness, 5/4/3-match tier evaluation, mathematical prize pool split & rollover calculations.
 - **`src/__tests__/auth-security.test.ts`**: Privilege escalation blocking, winner proof-only mutation enforcement, admin guard contracts.

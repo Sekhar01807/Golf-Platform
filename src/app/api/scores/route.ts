@@ -55,53 +55,28 @@ export async function POST(request: NextRequest) {
 
     const { score, date_played } = validation.data;
 
-    // First try invoking the database RPC for transactional FIFO enforcement
-    const { data: rpcResult, error: rpcError } = await supabase.rpc('add_golf_score', {
+    // Strict transactional FIFO insertion via PostgreSQL stored function
+    const { data: scoreId, error: rpcError } = await supabase.rpc('add_golf_score', {
       p_user_id: user.id,
       p_score: score,
       p_date_played: date_played,
     });
 
-    if (!rpcError && rpcResult) {
-      const { data: insertedScore } = await supabase
-        .from('golf_scores')
-        .select('*')
-        .eq('id', rpcResult)
-        .single();
-
-      return NextResponse.json(insertedScore || { id: rpcResult, user_id: user.id, score, date_played });
+    if (rpcError) {
+      console.error('Transactional add_golf_score RPC error:', rpcError);
+      return NextResponse.json(
+        { error: 'Failed to record score transactionally. Ensure database functions are migrated.' },
+        { status: 500 }
+      );
     }
 
-    // Fallback if RPC is not yet migrated in current DB instance
-    const { data: existing } = await supabase
+    const { data: insertedScore } = await supabase
       .from('golf_scores')
-      .select('id, date_played, created_at')
-      .eq('user_id', user.id)
-      .order('date_played', { ascending: true })
-      .order('created_at', { ascending: true });
-
-    // FIFO: If 5 scores exist, delete oldest
-    if (existing && existing.length >= 5) {
-      const toDelete = existing.slice(0, existing.length - 4).map(s => s.id);
-      await supabase.from('golf_scores').delete().in('id', toDelete);
-    }
-
-    const { data: newScore, error: insertError } = await supabase
-      .from('golf_scores')
-      .insert({
-        user_id: user.id,
-        score,
-        date_played,
-      })
-      .select()
+      .select('*')
+      .eq('id', scoreId)
       .single();
 
-    if (insertError) {
-      console.error('Score insert error:', insertError);
-      return NextResponse.json({ error: insertError.message || 'Failed to insert score' }, { status: 500 });
-    }
-
-    return NextResponse.json(newScore);
+    return NextResponse.json(insertedScore || { id: scoreId, user_id: user.id, score, date_played }, { status: 201 });
   } catch (error) {
     console.error('Score insert exception:', error);
     return NextResponse.json({ error: 'Failed to process score submission' }, { status: 500 });
