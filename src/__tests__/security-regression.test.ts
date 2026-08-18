@@ -130,28 +130,60 @@ describe('Regression 8: Transactional 6th-Score FIFO (Preserves Exactly 5 Scores
   });
 });
 
-describe('Regression 9: Duplicate Stripe Event Idempotency', () => {
-  class MockStripeEventStore {
-    private processed = new Set<string>();
+describe('Regression 9: Stateful Stripe Event Idempotency & Financial Retryability', () => {
+  type EventStatus = 'processing' | 'completed' | 'failed';
 
-    receive(eventId: string) {
-      if (this.processed.has(eventId)) {
-        return { status: 200, duplicate: true };
+  class StatefulStripeEventStore {
+    private events = new Map<string, { status: EventStatus; createdAt: Date }>();
+
+    claim(eventId: string, now: Date = new Date()): { status: 'CLAIMED' | 'DUPLICATE_COMPLETED' | 'IN_FLIGHT' } {
+      const existing = this.events.get(eventId);
+      if (existing) {
+        if (existing.status === 'completed') {
+          return { status: 'DUPLICATE_COMPLETED' };
+        }
+        const isRecent = (now.getTime() - existing.createdAt.getTime()) < 60000;
+        if (existing.status === 'processing' && isRecent) {
+          return { status: 'IN_FLIGHT' };
+        }
+        existing.status = 'processing';
+        existing.createdAt = now;
+        return { status: 'CLAIMED' };
       }
-      this.processed.add(eventId);
-      return { status: 200, duplicate: false };
+      this.events.set(eventId, { status: 'processing', createdAt: now });
+      return { status: 'CLAIMED' };
+    }
+
+    complete(eventId: string) {
+      const e = this.events.get(eventId);
+      if (e) e.status = 'completed';
+    }
+
+    fail(eventId: string) {
+      const e = this.events.get(eventId);
+      if (e) e.status = 'failed';
     }
   }
 
-  it('9. should recognize duplicate Stripe webhook deliveries and return idempotent success', () => {
-    const store = new MockStripeEventStore();
-    const eventId = 'evt_123456';
+  it('9. should allow event retry when business logic fails and only suppress duplicates after completion', () => {
+    const store = new StatefulStripeEventStore();
+    const eventId = 'evt_retry_123456';
 
-    const first = store.receive(eventId);
-    expect(first.duplicate).toBe(false);
+    // 1st delivery: fails during business logic (e.g. transient DB timeout)
+    const claim1 = store.claim(eventId);
+    expect(claim1.status).toBe('CLAIMED');
+    // Handler fails business operation and marks failed
+    store.fail(eventId);
 
-    const second = store.receive(eventId);
-    expect(second.duplicate).toBe(true);
+    // 2nd delivery: Stripe retries the same event after backoff
+    const claim2 = store.claim(eventId);
+    expect(claim2.status).toBe('CLAIMED'); // Can be re-claimed and retried!
+    // Handler completes business operation
+    store.complete(eventId);
+
+    // 3rd delivery: subsequent retry recognized as duplicate
+    const claim3 = store.claim(eventId);
+    expect(claim3.status).toBe('DUPLICATE_COMPLETED');
   });
 });
 
@@ -172,7 +204,7 @@ describe('Regression 10: Completed Donation Updates Charity Total Atomically', (
   });
 });
 
-describe('Regression 11: Fail-Closed Webhook Idempotency on DB Failure', () => {
+describe('Regression 11: Fail-Closed Webhook Idempotency & Database Update Error Guards', () => {
   function processWebhookIdempotency(dbInsertResult: { error: { code?: string; message?: string } | null }) {
     if (dbInsertResult.error) {
       if (
@@ -188,13 +220,23 @@ describe('Regression 11: Fail-Closed Webhook Idempotency on DB Failure', () => {
     return { status: 200, processed: true };
   }
 
-  it('11. should fail closed with status 500 when database idempotency claim errors', () => {
+  function handleWebhookDbUpdate(updateResult: { error: { message: string } | null }) {
+    if (updateResult.error) {
+      throw new Error(`Database mutation failed: ${updateResult.error.message}`);
+    }
+    return { success: true };
+  }
+
+  it('11. should fail closed with status 500 when database idempotency or update errors occur', () => {
     const dbDownResult = processWebhookIdempotency({ error: { code: '57P01', message: 'Admin shutdown / connection refused' } });
     expect(dbDownResult.status).toBe(500);
 
     const duplicateResult = processWebhookIdempotency({ error: { code: '23505', message: 'duplicate key value violates unique constraint' } });
     expect(duplicateResult.status).toBe(200);
     expect(duplicateResult.duplicate).toBe(true);
+
+    expect(() => handleWebhookDbUpdate({ error: { message: 'table locked' } })).toThrow('Database mutation failed');
+    expect(handleWebhookDbUpdate({ error: null }).success).toBe(true);
   });
 });
 

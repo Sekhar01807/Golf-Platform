@@ -1,49 +1,136 @@
 import { describe, it, expect } from 'vitest';
 
-describe('Stripe Webhook Idempotency Pipeline', () => {
-  class MockStripeEventStore {
-    private processedEvents = new Set<string>();
+describe('Stateful Stripe Webhook Idempotency & Financial Correctness Pipeline', () => {
+  type EventStatus = 'processing' | 'completed' | 'failed';
 
-    public processEvent(eventId: string, eventType: string): { processed: boolean; duplicate: boolean } {
-      if (this.processedEvents.has(eventId)) {
-        return { processed: false, duplicate: true };
+  interface StoredEvent {
+    id: string;
+    eventType: string;
+    status: EventStatus;
+    createdAt: Date;
+    processedAt?: Date;
+  }
+
+  class StatefulStripeEventStore {
+    private events = new Map<string, StoredEvent>();
+
+    public claimEvent(eventId: string, eventType: string, now: Date = new Date()): { claimStatus: 'CLAIMED' | 'DUPLICATE_COMPLETED' | 'IN_FLIGHT' } {
+      const existing = this.events.get(eventId);
+
+      if (existing) {
+        if (existing.status === 'completed') {
+          return { claimStatus: 'DUPLICATE_COMPLETED' };
+        }
+
+        const isRecent = (now.getTime() - existing.createdAt.getTime()) < 60000;
+        if (existing.status === 'processing' && isRecent) {
+          return { claimStatus: 'IN_FLIGHT' };
+        }
+
+        // Stale or failed attempt: re-claim for retry
+        existing.status = 'processing';
+        existing.createdAt = now;
+        return { claimStatus: 'CLAIMED' };
       }
 
-      this.processedEvents.add(eventId);
-      return { processed: true, duplicate: false };
+      this.events.set(eventId, {
+        id: eventId,
+        eventType,
+        status: 'processing',
+        createdAt: now,
+      });
+
+      return { claimStatus: 'CLAIMED' };
     }
 
-    public isEventProcessed(eventId: string): boolean {
-      return this.processedEvents.has(eventId);
+    public completeEvent(eventId: string, now: Date = new Date()): void {
+      const event = this.events.get(eventId);
+      if (event) {
+        event.status = 'completed';
+        event.processedAt = now;
+      }
+    }
+
+    public failEvent(eventId: string): void {
+      const event = this.events.get(eventId);
+      if (event) {
+        event.status = 'failed';
+      }
+    }
+
+    public getEvent(eventId: string): StoredEvent | undefined {
+      return this.events.get(eventId);
     }
   }
 
-  it('should process a first-time Stripe event', () => {
-    const store = new MockStripeEventStore();
+  it('1. should process a fresh Stripe event and mark it completed after business execution', () => {
+    const store = new StatefulStripeEventStore();
     const eventId = 'evt_test_checkout_12345';
 
-    const result = store.processEvent(eventId, 'checkout.session.completed');
-    expect(result.processed).toBe(true);
-    expect(result.duplicate).toBe(false);
-    expect(store.isEventProcessed(eventId)).toBe(true);
+    const claim = store.claimEvent(eventId, 'checkout.session.completed');
+    expect(claim.claimStatus).toBe('CLAIMED');
+    expect(store.getEvent(eventId)?.status).toBe('processing');
+
+    // Simulate successful business logic execution
+    store.completeEvent(eventId);
+    expect(store.getEvent(eventId)?.status).toBe('completed');
+    expect(store.getEvent(eventId)?.processedAt).toBeDefined();
   });
 
-  it('should detect and suppress duplicate retried Stripe events', () => {
-    const store = new MockStripeEventStore();
+  it('2. should recognize completed events on retry and return DUPLICATE_COMPLETED', () => {
+    const store = new StatefulStripeEventStore();
     const eventId = 'evt_test_checkout_99999';
 
-    // First arrival
-    const res1 = store.processEvent(eventId, 'customer.subscription.updated');
-    expect(res1.processed).toBe(true);
-    expect(res1.duplicate).toBe(false);
+    // First successful delivery
+    const claim1 = store.claimEvent(eventId, 'customer.subscription.updated');
+    expect(claim1.claimStatus).toBe('CLAIMED');
+    store.completeEvent(eventId);
 
     // Second arrival (Stripe webhook retry)
-    const res2 = store.processEvent(eventId, 'customer.subscription.updated');
-    expect(res2.processed).toBe(false);
-    expect(res2.duplicate).toBe(true);
+    const claim2 = store.claimEvent(eventId, 'customer.subscription.updated');
+    expect(claim2.claimStatus).toBe('DUPLICATE_COMPLETED');
   });
 
-  it('should distinguish database errors from duplicates and fail closed', () => {
+  it('3. should NOT treat an event as completed duplicate if the business logic failed, enabling successful retry', () => {
+    const store = new StatefulStripeEventStore();
+    const eventId = 'evt_transient_failure_555';
+    let databaseOnline = false;
+
+    // Delivery 1: DB is temporarily down, business logic throws
+    const claim1 = store.claimEvent(eventId, 'checkout.session.completed');
+    expect(claim1.claimStatus).toBe('CLAIMED');
+
+    // Business operation fails due to transient DB error
+    try {
+      if (!databaseOnline) {
+        throw new Error('Connection refused to database');
+      }
+      store.completeEvent(eventId);
+    } catch {
+      // Catch handler marks event as failed and returns 500 to Stripe
+      store.failEvent(eventId);
+    }
+
+    expect(store.getEvent(eventId)?.status).toBe('failed');
+
+    // Delivery 2: Stripe retries the same event after backoff, DB is now online
+    databaseOnline = true;
+    const retryClaim = store.claimEvent(eventId, 'checkout.session.completed');
+    expect(retryClaim.claimStatus).toBe('CLAIMED'); // Crucial: NOT treated as duplicate!
+
+    // Business logic succeeds on retry
+    if (databaseOnline) {
+      store.completeEvent(eventId);
+    }
+
+    expect(store.getEvent(eventId)?.status).toBe('completed');
+
+    // Delivery 3: Subsequent retry after completion is now recognized as duplicate
+    const postCompleteClaim = store.claimEvent(eventId, 'checkout.session.completed');
+    expect(postCompleteClaim.claimStatus).toBe('DUPLICATE_COMPLETED');
+  });
+
+  it('4. should fail closed when database idempotency claim encounters an error', () => {
     function evaluateWebhookInsertResult(err: { code?: string } | null) {
       if (!err) return { status: 200, proceed: true };
       if (err.code === '23505') return { status: 200, duplicate: true, proceed: false };
@@ -54,5 +141,19 @@ describe('Stripe Webhook Idempotency Pipeline', () => {
     expect(evaluateWebhookInsertResult({ code: '23505' }).duplicate).toBe(true);
     expect(evaluateWebhookInsertResult({ code: '40001' }).status).toBe(500); // Serialization failure
     expect(evaluateWebhookInsertResult({ code: '08006' }).status).toBe(500); // Connection failure
+  });
+
+  it('5. should fail closed and throw if any database update returns an error in webhook handlers', () => {
+    function handleSubscriptionUpdate(updateResult: { error: { message: string } | null }) {
+      if (updateResult.error) {
+        throw new Error(`Failed to update subscription in database: ${updateResult.error.message}`);
+      }
+      return { success: true };
+    }
+
+    expect(() => handleSubscriptionUpdate({ error: { message: 'relation users does not exist' } }))
+      .toThrow('Failed to update subscription in database');
+
+    expect(handleSubscriptionUpdate({ error: null }).success).toBe(true);
   });
 });

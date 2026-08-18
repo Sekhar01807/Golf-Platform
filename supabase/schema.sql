@@ -15,6 +15,7 @@ CREATE TYPE draw_type AS ENUM ('random', 'algorithmic');
 CREATE TYPE verification_status AS ENUM ('pending', 'approved', 'rejected');
 CREATE TYPE payout_status AS ENUM ('pending', 'paid');
 CREATE TYPE payment_status AS ENUM ('pending', 'completed');
+CREATE TYPE stripe_event_status AS ENUM ('processing', 'completed', 'failed');
 
 -- ═══════════════════════════════════════════════════
 -- 1. USERS TABLE (public profile, linked to auth.users)
@@ -160,12 +161,14 @@ CREATE TABLE public.independent_donations (
 );
 
 -- ═══════════════════════════════════════════════════
--- 8. STRIPE EVENTS (Webhook Idempotency)
+-- 8. STRIPE EVENTS (Stateful Webhook Idempotency)
 -- ═══════════════════════════════════════════════════
 CREATE TABLE public.stripe_events (
   id TEXT PRIMARY KEY,
   event_type TEXT NOT NULL,
-  processed_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  status stripe_event_status NOT NULL DEFAULT 'processing',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  processed_at TIMESTAMPTZ
 );
 
 -- ═══════════════════════════════════════════════════
@@ -483,8 +486,83 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
 
+-- G. Stateful Stripe Webhook Idempotency Functions
+CREATE OR REPLACE FUNCTION public.claim_stripe_event(
+  p_event_id TEXT,
+  p_event_type TEXT
+)
+RETURNS TEXT AS $$
+DECLARE
+  v_existing RECORD;
+BEGIN
+  -- Verify caller identity: strictly restricted to service_role / webhook background execution
+  IF current_user != 'service_role' AND current_setting('request.jwt.claim.role', true) != 'service_role' THEN
+    RAISE EXCEPTION 'Unauthorized: claim_stripe_event is restricted to service_role execution.';
+  END IF;
+
+  SELECT * INTO v_existing FROM public.stripe_events WHERE id = p_event_id FOR UPDATE;
+
+  IF FOUND THEN
+    -- 1. If already completed, it is an idempotent duplicate
+    IF v_existing.status = 'completed' THEN
+      RETURN 'DUPLICATE_COMPLETED';
+    END IF;
+
+    -- 2. If in-flight processing within the last 60 seconds, prevent concurrent execution
+    IF v_existing.status = 'processing' AND v_existing.created_at > (now() - INTERVAL '60 seconds') THEN
+      RETURN 'IN_FLIGHT';
+    END IF;
+
+    -- 3. If previous attempt failed or timed out (> 60s), re-claim for retry
+    UPDATE public.stripe_events
+    SET status = 'processing',
+        created_at = now()
+    WHERE id = p_event_id;
+
+    RETURN 'CLAIMED';
+  ELSE
+    -- Fresh event: insert as processing
+    INSERT INTO public.stripe_events (id, event_type, status, created_at)
+    VALUES (p_event_id, p_event_type, 'processing', now());
+
+    RETURN 'CLAIMED';
+  END IF;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
+
+CREATE OR REPLACE FUNCTION public.complete_stripe_event(
+  p_event_id TEXT
+)
+RETURNS VOID AS $$
+BEGIN
+  IF current_user != 'service_role' AND current_setting('request.jwt.claim.role', true) != 'service_role' THEN
+    RAISE EXCEPTION 'Unauthorized: complete_stripe_event is restricted to service_role execution.';
+  END IF;
+
+  UPDATE public.stripe_events
+  SET status = 'completed',
+      processed_at = now()
+  WHERE id = p_event_id;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
+
+CREATE OR REPLACE FUNCTION public.fail_stripe_event(
+  p_event_id TEXT
+)
+RETURNS VOID AS $$
+BEGIN
+  IF current_user != 'service_role' AND current_setting('request.jwt.claim.role', true) != 'service_role' THEN
+    RAISE EXCEPTION 'Unauthorized: fail_stripe_event is restricted to service_role execution.';
+  END IF;
+
+  UPDATE public.stripe_events
+  SET status = 'failed'
+  WHERE id = p_event_id;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
+
 -- ═══════════════════════════════════════════════════
--- G. EXPLICIT EXECUTION PRIVILEGE REVOCATIONS & GRANTS
+-- H. EXPLICIT EXECUTION PRIVILEGE REVOCATIONS & GRANTS
 -- ═══════════════════════════════════════════════════
 
 -- 1. Trigger functions: Internal trigger execution only
@@ -505,6 +583,15 @@ GRANT EXECUTE ON FUNCTION public.publish_draw_atomic(UUID, JSONB, NUMERIC, UUID)
 
 REVOKE ALL ON FUNCTION public.record_completed_donation(UUID, UUID, NUMERIC, TEXT) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.record_completed_donation(UUID, UUID, NUMERIC, TEXT) TO service_role;
+
+REVOKE ALL ON FUNCTION public.claim_stripe_event(TEXT, TEXT) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.claim_stripe_event(TEXT, TEXT) TO service_role;
+
+REVOKE ALL ON FUNCTION public.complete_stripe_event(TEXT) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.complete_stripe_event(TEXT) TO service_role;
+
+REVOKE ALL ON FUNCTION public.fail_stripe_event(TEXT) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.fail_stripe_event(TEXT) TO service_role;
 
 -- ═══════════════════════════════════════════════════
 -- 11. ROW LEVEL SECURITY (RLS) POLICIES
