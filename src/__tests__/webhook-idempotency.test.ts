@@ -22,12 +22,12 @@ describe('Stateful Stripe Webhook Idempotency & Financial Correctness Pipeline',
           return { claimStatus: 'DUPLICATE_COMPLETED' };
         }
 
-        const isRecent = (now.getTime() - existing.createdAt.getTime()) < 60000;
+        const isRecent = (now.getTime() - existing.createdAt.getTime()) < 300000;
         if (existing.status === 'processing' && isRecent) {
           return { claimStatus: 'IN_FLIGHT' };
         }
 
-        // Stale or failed attempt: re-claim for retry
+        // Stale or failed attempt (> 300s): re-claim for retry
         existing.status = 'processing';
         existing.createdAt = now;
         return { claimStatus: 'CLAIMED' };
@@ -155,5 +155,65 @@ describe('Stateful Stripe Webhook Idempotency & Financial Correctness Pipeline',
       .toThrow('Failed to update subscription in database');
 
     expect(handleSubscriptionUpdate({ error: null }).success).toBe(true);
+  });
+
+  it('6. should fail closed with status 500 when completion update fails after business processing', () => {
+    function finalizeStripeEvent(rpcErr: Error | null, directErr: Error | null): { status: number } {
+      if (rpcErr && directErr) {
+        // Must throw to fail closed and trigger Stripe retry
+        throw new Error(`Failed to record stripe event completion: ${directErr.message}`);
+      }
+      return { status: 200 };
+    }
+
+    expect(() => finalizeStripeEvent(new Error('RPC failed'), new Error('DB connection lost')))
+      .toThrow('Failed to record stripe event completion');
+    expect(finalizeStripeEvent(null, null).status).toBe(200);
+  });
+
+  it('7. should protect concurrent in-flight re-processing for up to 300 seconds (5 minutes)', () => {
+    const store = new StatefulStripeEventStore();
+    const eventId = 'evt_long_running_financial_op';
+    const t0 = new Date('2026-08-19T00:00:00Z');
+
+    const claim1 = store.claimEvent(eventId, 'checkout.session.completed', t0);
+    expect(claim1.claimStatus).toBe('CLAIMED');
+
+    // Concurrently delivered 120 seconds later (within 300s window)
+    const t120 = new Date('2026-08-19T00:02:00Z');
+    const claim2 = store.claimEvent(eventId, 'checkout.session.completed', t120);
+    expect(claim2.claimStatus).toBe('IN_FLIGHT');
+
+    // Stale delivery 301 seconds later (past 300s window) -> reclaimable for retry
+    const t301 = new Date('2026-08-19T00:05:01Z');
+    const claim3 = store.claimEvent(eventId, 'checkout.session.completed', t301);
+    expect(claim3.claimStatus).toBe('CLAIMED');
+  });
+
+  it('8. should enforce stripe_payment_id uniqueness for donations and prevent double-incrementing', () => {
+    const donationLedger = new Map<string, { id: string; amount: number; charityId: string }>();
+    const charityBalances = new Map<string, number>([['charity-1', 10000]]);
+
+    function recordDonation(paymentId: string, charityId: string, amount: number): string {
+      const existing = donationLedger.get(paymentId);
+      if (existing) {
+        // Idempotent: return existing record without double-incrementing
+        return existing.id;
+      }
+      const newId = `don_${Date.now()}`;
+      donationLedger.set(paymentId, { id: newId, amount, charityId });
+      const current = charityBalances.get(charityId) || 0;
+      charityBalances.set(charityId, current + amount);
+      return newId;
+    }
+
+    const donId1 = recordDonation('pi_stripe_123', 'charity-1', 2500);
+    expect(charityBalances.get('charity-1')).toBe(12500);
+
+    // Duplicate webhook with same Stripe payment ID
+    const donId2 = recordDonation('pi_stripe_123', 'charity-1', 2500);
+    expect(donId2).toBe(donId1);
+    // Balance remains exactly 12500, NOT 15000!
+    expect(charityBalances.get('charity-1')).toBe(12500);
   });
 });

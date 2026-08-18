@@ -49,7 +49,7 @@ export async function POST(request: NextRequest) {
         if (existingEvent.status === 'completed') {
           return NextResponse.json({ received: true, duplicate: true });
         }
-        const isRecent = existingEvent.created_at && (Date.now() - new Date(existingEvent.created_at).getTime()) < 60000;
+        const isRecent = existingEvent.created_at && (Date.now() - new Date(existingEvent.created_at).getTime()) < 300000;
         if (existingEvent.status === 'processing' && isRecent) {
           return NextResponse.json({ received: true, in_flight: true });
         }
@@ -319,10 +319,15 @@ export async function POST(request: NextRequest) {
     // ── 3. Mark Event Completed Only After Business Operation Succeeded ──
     const { error: completeErr } = await supabase.rpc('complete_stripe_event', { p_event_id: event.id });
     if (completeErr) {
-      await supabase.from('stripe_events').update({
+      const { error: directUpdateErr } = await supabase.from('stripe_events').update({
         status: 'completed',
         processed_at: new Date().toISOString(),
       }).eq('id', event.id);
+
+      if (directUpdateErr) {
+        console.error('Failed both complete_stripe_event RPC and direct update (failing closed):', directUpdateErr);
+        throw new Error(`Failed to record stripe event completion: ${directUpdateErr.message}`);
+      }
     }
 
     return NextResponse.json({ received: true });

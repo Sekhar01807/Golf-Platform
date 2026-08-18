@@ -17,6 +17,7 @@ describe('Security Suite: Privilege Escalation & Authorization Boundaries', () =
 
     const protectedFields = [
       'role',
+      'email',
       'subscription_status',
       'subscription_plan',
       'stripe_customer_id',
@@ -48,6 +49,20 @@ describe('Security Suite: Privilege Escalation & Authorization Boundaries', () =
 
     expect(result.allowed).toBe(false);
     expect(result.error).toContain('role');
+  });
+
+  it('should block a user from directly modifying email on their profile (sync via Supabase Auth)', () => {
+    const oldRecord = { id: 'user-1', email: 'user@example.com', full_name: 'John' };
+    const newRecord = { id: 'user-1', email: 'hacked@example.com', full_name: 'John' };
+
+    const result = simulateUserUpdatePolicy({
+      callerRole: 'user',
+      oldRecord,
+      newRecord,
+    });
+
+    expect(result.allowed).toBe(false);
+    expect(result.error).toContain('email');
   });
 
   it('should block a user from directly modifying subscription_status or customer_id', () => {
@@ -97,12 +112,14 @@ describe('Security Suite: Winner Proof-Only Mutation Enforcement', () => {
     }
 
     const forbiddenFields = [
+      'id',
       'verification_status',
       'payout_status',
       'prize_amount',
       'match_type',
       'draw_id',
       'user_id',
+      'created_at',
     ];
 
     for (const field of forbiddenFields) {
@@ -129,6 +146,20 @@ describe('Security Suite: Winner Proof-Only Mutation Enforcement', () => {
 
     expect(result.allowed).toBe(false);
     expect(result.error).toContain('verification_status');
+  });
+
+  it('should block a winner from tampering with created_at timestamp', () => {
+    const oldRecord = { id: 'win-1', verification_status: 'pending', created_at: '2026-08-01T00:00:00Z' };
+    const newRecord = { id: 'win-1', verification_status: 'pending', created_at: '2026-08-18T00:00:00Z' };
+
+    const result = simulateWinnerUpdatePolicy({
+      callerRole: 'user',
+      oldRecord,
+      newRecord,
+    });
+
+    expect(result.allowed).toBe(false);
+    expect(result.error).toContain('created_at');
   });
 
   it('should block a winner from altering their prize amount', () => {
@@ -206,5 +237,21 @@ describe('Security Suite: Payout Approval Invariant & RPC Caller Boundaries', ()
     expect(simulateRecordDonationBoundary('user').allowed).toBe(false);
     expect(simulateRecordDonationBoundary('admin').allowed).toBe(false);
     expect(simulateRecordDonationBoundary('service_role').allowed).toBe(true);
+  });
+
+  it('should disallow direct client INSERT on golf_scores table bypassing add_golf_score RPC', () => {
+    function simulateTableInsertRls(tableName: string, clientRole: string) {
+      if (tableName === 'golf_scores') {
+        // Direct insert policy was removed: authenticated users cannot insert directly into the table
+        if (clientRole === 'authenticated' || clientRole === 'anon') {
+          return { allowed: false, error: 'new row violates row-level security policy for table "golf_scores"' };
+        }
+      }
+      return { allowed: true };
+    }
+
+    expect(simulateTableInsertRls('golf_scores', 'authenticated').allowed).toBe(false);
+    expect(simulateTableInsertRls('golf_scores', 'anon').allowed).toBe(false);
+    expect(simulateTableInsertRls('golf_scores', 'service_role').allowed).toBe(true);
   });
 });

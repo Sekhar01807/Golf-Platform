@@ -56,6 +56,24 @@ CREATE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
   FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
 
+-- Auto-synchronize email from Supabase auth.users to public.users profile
+CREATE OR REPLACE FUNCTION public.handle_user_email_sync()
+RETURNS TRIGGER AS $$
+BEGIN
+  IF NEW.email IS DISTINCT FROM OLD.email THEN
+    UPDATE public.users
+    SET email = NEW.email,
+        updated_at = now()
+    WHERE id = NEW.id;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
+
+CREATE TRIGGER on_auth_user_email_updated
+  AFTER UPDATE OF email ON auth.users
+  FOR EACH ROW EXECUTE FUNCTION public.handle_user_email_sync();
+
 -- Auto-update updated_at
 CREATE OR REPLACE FUNCTION update_updated_at()
 RETURNS TRIGGER AS $$
@@ -156,7 +174,7 @@ CREATE TABLE public.independent_donations (
   charity_id UUID NOT NULL REFERENCES public.charities(id) ON DELETE RESTRICT,
   amount NUMERIC NOT NULL CHECK (amount > 0),
   payment_status payment_status NOT NULL DEFAULT 'pending',
-  stripe_payment_id TEXT,
+  stripe_payment_id TEXT UNIQUE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -212,6 +230,9 @@ BEGIN
   IF NEW.role IS DISTINCT FROM OLD.role THEN
     RAISE EXCEPTION 'Privilege escalation blocked: Cannot modify user role.';
   END IF;
+  IF NEW.email IS DISTINCT FROM OLD.email THEN
+    RAISE EXCEPTION 'Direct update blocked: Email cannot be updated directly on user profile. Please update via Supabase Auth.';
+  END IF;
   IF NEW.subscription_status IS DISTINCT FROM OLD.subscription_status THEN
     RAISE EXCEPTION 'Direct update blocked: Subscription status is server/Stripe controlled.';
   END IF;
@@ -266,13 +287,16 @@ BEGIN
     RAISE EXCEPTION 'Proof cannot be updated once verification has been reviewed.';
   END IF;
 
-  IF NEW.verification_status IS DISTINCT FROM OLD.verification_status OR
-     NEW.payout_status IS DISTINCT FROM OLD.payout_status OR
-     NEW.prize_amount IS DISTINCT FROM OLD.prize_amount OR
-     NEW.match_type IS DISTINCT FROM OLD.match_type OR
+  -- Strictly protect every non-proof field against mutation
+  IF NEW.id IS DISTINCT FROM OLD.id OR
      NEW.draw_id IS DISTINCT FROM OLD.draw_id OR
-     NEW.user_id IS DISTINCT FROM OLD.user_id THEN
-    RAISE EXCEPTION 'Unauthorized: Users can only upload winner proof URLs.';
+     NEW.user_id IS DISTINCT FROM OLD.user_id OR
+     NEW.match_type IS DISTINCT FROM OLD.match_type OR
+     NEW.prize_amount IS DISTINCT FROM OLD.prize_amount OR
+     NEW.verification_status IS DISTINCT FROM OLD.verification_status OR
+     NEW.payout_status IS DISTINCT FROM OLD.payout_status OR
+     NEW.created_at IS DISTINCT FROM OLD.created_at THEN
+    RAISE EXCEPTION 'Unauthorized: Users can only upload winner proof URLs. All other fields are immutable.';
   END IF;
 
   RETURN NEW;
@@ -282,6 +306,27 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
 CREATE TRIGGER protect_draw_winner_fields_trigger
   BEFORE UPDATE ON public.draw_winners
   FOR EACH ROW EXECUTE FUNCTION public.protect_draw_winner_fields();
+
+-- Protect Charity total_contributions from manual client mutation
+CREATE OR REPLACE FUNCTION public.protect_charity_contributions()
+RETURNS TRIGGER AS $$
+BEGIN
+  -- Service role / internal RPC bypass
+  IF current_user = 'service_role' OR current_setting('request.jwt.claim.role', true) = 'service_role' THEN
+    RETURN NEW;
+  END IF;
+
+  IF NEW.total_contributions IS DISTINCT FROM OLD.total_contributions THEN
+    RAISE EXCEPTION 'Direct update blocked: Charity total_contributions is ledger-calculated and restricted to service_role.';
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
+
+CREATE TRIGGER protect_charity_contributions_trigger
+  BEFORE UPDATE ON public.charities
+  FOR EACH ROW EXECUTE FUNCTION public.protect_charity_contributions();
 
 -- C. Atomic Subscription Checkout Claim (Concurrency Race Condition Guard)
 CREATE OR REPLACE FUNCTION public.claim_checkout_lock(
@@ -453,7 +498,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
 
--- F. Atomic Donation Ledger Update (Service-Role Boundary Restricted)
+-- F. Atomic Donation Ledger Update (Service-Role Boundary Restricted & Idempotent)
 CREATE OR REPLACE FUNCTION public.record_completed_donation(
   p_user_id UUID,
   p_charity_id UUID,
@@ -471,6 +516,17 @@ BEGIN
 
   IF p_amount <= 0 THEN
     RAISE EXCEPTION 'Donation amount must be greater than 0';
+  END IF;
+
+  -- Idempotency guard: If this Stripe payment was already recorded, return existing ID without double-incrementing
+  IF p_stripe_payment_id IS NOT NULL THEN
+    SELECT id INTO v_donation_id
+    FROM public.independent_donations
+    WHERE stripe_payment_id = p_stripe_payment_id;
+
+    IF FOUND THEN
+      RETURN v_donation_id;
+    END IF;
   END IF;
 
   INSERT INTO public.independent_donations (user_id, charity_id, amount, payment_status, stripe_payment_id)
@@ -508,12 +564,12 @@ BEGIN
       RETURN 'DUPLICATE_COMPLETED';
     END IF;
 
-    -- 2. If in-flight processing within the last 60 seconds, prevent concurrent execution
-    IF v_existing.status = 'processing' AND v_existing.created_at > (now() - INTERVAL '60 seconds') THEN
+    -- 2. If in-flight processing within the last 300 seconds (5 minutes), prevent concurrent execution
+    IF v_existing.status = 'processing' AND v_existing.created_at > (now() - INTERVAL '300 seconds') THEN
       RETURN 'IN_FLIGHT';
     END IF;
 
-    -- 3. If previous attempt failed or timed out (> 60s), re-claim for retry
+    -- 3. If previous attempt failed or timed out (> 300s), re-claim for retry
     UPDATE public.stripe_events
     SET status = 'processing',
         created_at = now()
@@ -567,8 +623,10 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
 
 -- 1. Trigger functions: Internal trigger execution only
 REVOKE ALL ON FUNCTION public.handle_new_user() FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.handle_user_email_sync() FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.protect_user_fields() FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.protect_draw_winner_fields() FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.protect_charity_contributions() FROM PUBLIC, anon, authenticated;
 
 -- 2. Authenticated user RPCs
 REVOKE ALL ON FUNCTION public.claim_checkout_lock(UUID) FROM PUBLIC, anon;
@@ -620,9 +678,8 @@ CREATE POLICY "Admin manage charities" ON public.charities FOR ALL USING (
   EXISTS (SELECT 1 FROM public.users WHERE id = auth.uid() AND role = 'admin')
 );
 
--- Golf Scores
+-- Golf Scores (Direct client INSERT is disabled; score submissions must go through the transactional add_golf_score RPC)
 CREATE POLICY "Users read own scores" ON public.golf_scores FOR SELECT USING (auth.uid() = user_id);
-CREATE POLICY "Users insert own scores" ON public.golf_scores FOR INSERT WITH CHECK (auth.uid() = user_id);
 CREATE POLICY "Users delete own scores" ON public.golf_scores FOR DELETE USING (auth.uid() = user_id);
 CREATE POLICY "Admin full access scores" ON public.golf_scores FOR ALL USING (
   EXISTS (SELECT 1 FROM public.users WHERE id = auth.uid() AND role = 'admin')
@@ -647,9 +704,9 @@ CREATE POLICY "Admin manage winners" ON public.draw_winners FOR ALL USING (
   EXISTS (SELECT 1 FROM public.users WHERE id = auth.uid() AND role = 'admin')
 );
 
--- Independent Donations (No direct client insert; handled via server-side Stripe webhook)
+-- Independent Donations (Immutable financial ledger; read-only for users & admins, mutations restricted to service_role)
 CREATE POLICY "Users read own donations" ON public.independent_donations FOR SELECT USING (auth.uid() = user_id);
-CREATE POLICY "Admin manage donations" ON public.independent_donations FOR ALL USING (
+CREATE POLICY "Admin read donations" ON public.independent_donations FOR SELECT USING (
   EXISTS (SELECT 1 FROM public.users WHERE id = auth.uid() AND role = 'admin')
 );
 

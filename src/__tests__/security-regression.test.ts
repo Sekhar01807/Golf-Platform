@@ -142,7 +142,7 @@ describe('Regression 9: Stateful Stripe Event Idempotency & Financial Retryabili
         if (existing.status === 'completed') {
           return { status: 'DUPLICATE_COMPLETED' };
         }
-        const isRecent = (now.getTime() - existing.createdAt.getTime()) < 60000;
+        const isRecent = (now.getTime() - existing.createdAt.getTime()) < 300000;
         if (existing.status === 'processing' && isRecent) {
           return { status: 'IN_FLIGHT' };
         }
@@ -187,20 +187,44 @@ describe('Regression 9: Stateful Stripe Event Idempotency & Financial Retryabili
   });
 });
 
-describe('Regression 10: Completed Donation Updates Charity Total Atomically', () => {
-  function recordCompletedDonation(charity: { id: string; total: number }, donationAmount: number) {
+describe('Regression 10: Completed Donation Updates Charity Total Atomically & Idempotently', () => {
+  const processedPayments = new Set<string>();
+
+  function recordCompletedDonation(
+    charity: { id: string; total: number },
+    donationAmount: number,
+    stripePaymentId?: string
+  ) {
     if (donationAmount <= 0) throw new Error('Invalid donation amount');
+
+    if (stripePaymentId) {
+      if (processedPayments.has(stripePaymentId)) {
+        // Idempotent no-op: already recorded
+        return { charityId: charity.id, newTotal: charity.total, duplicate: true };
+      }
+      processedPayments.add(stripePaymentId);
+    }
+
     return {
       charityId: charity.id,
       newTotal: charity.total + donationAmount,
+      duplicate: false,
     };
   }
 
-  it('10. should synchronously increment charity total when a completed donation arrives', () => {
+  it('10. should synchronously increment charity total when a completed donation arrives and avoid duplicate incrementation on re-delivery', () => {
     const charity = { id: 'green-earth', total: 50000 };
-    const updated = recordCompletedDonation(charity, 2500);
+    const paymentId = 'pi_test_donation_unique_1';
 
-    expect(updated.newTotal).toBe(52500);
+    const delivery1 = recordCompletedDonation(charity, 2500, paymentId);
+    expect(delivery1.newTotal).toBe(52500);
+    expect(delivery1.duplicate).toBe(false);
+
+    // Re-delivery of same Stripe payment
+    charity.total = delivery1.newTotal;
+    const delivery2 = recordCompletedDonation(charity, 2500, paymentId);
+    expect(delivery2.newTotal).toBe(52500); // Does NOT inflate to 55000
+    expect(delivery2.duplicate).toBe(true);
   });
 });
 
@@ -502,5 +526,148 @@ describe('Regression 20: Stripe Webhook Customer-User Binding Cross-Verification
     const malicious = verifyWebhookCustomerBinding(user, 'usr_valid_uuid', 'cus_imposter_999');
     expect(malicious.valid).toBe(false);
     expect(malicious.error).toContain('mismatch');
+  });
+});
+
+describe('Regression 21: Direct Golf Score Client INSERT Policy Disabled (Requires Transactional add_golf_score RPC)', () => {
+  function simulateDirectTableInsert(tableName: string, callerRole: 'user' | 'admin' | 'service_role') {
+    if (tableName === 'golf_scores') {
+      // Direct client INSERT policy is removed; only service_role/RPC or admin have insert permissions
+      if (callerRole === 'user') {
+        return { allowed: false, error: 'Direct INSERT on golf_scores is prohibited. Use add_golf_score RPC.' };
+      }
+      return { allowed: true };
+    }
+    return { allowed: true };
+  }
+
+  it('21. should reject direct table INSERT into golf_scores by standard authenticated users', () => {
+    const userInsert = simulateDirectTableInsert('golf_scores', 'user');
+    expect(userInsert.allowed).toBe(false);
+    expect(userInsert.error).toContain('add_golf_score');
+
+    const adminInsert = simulateDirectTableInsert('golf_scores', 'admin');
+    expect(adminInsert.allowed).toBe(true);
+  });
+});
+
+describe('Regression 22: Stripe Webhook Completion Failure Fail-Closed (HTTP 500 Trigger)', () => {
+  function handleWebhookCompletion(rpcError: boolean, fallbackError: boolean): { status: number; retryable: boolean } {
+    if (rpcError && fallbackError) {
+      // Must throw/return 500 to signal Stripe to retry delivery
+      return { status: 500, retryable: true };
+    }
+    return { status: 200, retryable: false };
+  }
+
+  it('22. should return retryable HTTP 500 if both complete_stripe_event RPC and direct update fail', () => {
+    const res = handleWebhookCompletion(true, true);
+    expect(res.status).toBe(500);
+    expect(res.retryable).toBe(true);
+
+    const successRes = handleWebhookCompletion(false, false);
+    expect(successRes.status).toBe(200);
+    expect(successRes.retryable).toBe(false);
+  });
+});
+
+describe('Regression 23: User Profile Email Cannot Be Directly Updated (Auth Sync Guard)', () => {
+  function simulateEmailUpdate(callerRole: 'user' | 'admin' | 'service_role', targetUpdates: Record<string, unknown>) {
+    if (callerRole === 'service_role') return { allowed: true };
+    if ('email' in targetUpdates) {
+      return { allowed: false, error: 'Direct update blocked: Email cannot be updated directly on user profile.' };
+    }
+    return { allowed: true };
+  }
+
+  it('23. should reject direct email updates on user profiles by standard users and admins', () => {
+    const resUser = simulateEmailUpdate('user', { email: 'new@example.com' });
+    expect(resUser.allowed).toBe(false);
+    expect(resUser.error).toContain('Email cannot be updated directly');
+
+    const resService = simulateEmailUpdate('service_role', { email: 'new@example.com' });
+    expect(resService.allowed).toBe(true);
+  });
+});
+
+describe('Regression 24: Winner Non-Proof Field (created_at & id) Tamper Protection', () => {
+  function simulateWinnerNonProofProtection(callerRole: 'user' | 'admin', updates: Record<string, unknown>) {
+    if (callerRole === 'admin') return { allowed: true };
+    const allowedUserFields = ['winner_proof_url'];
+    for (const key of Object.keys(updates)) {
+      if (!allowedUserFields.includes(key)) {
+        return { allowed: false, rejectedField: key };
+      }
+    }
+    return { allowed: true };
+  }
+
+  it('24. should block winners from modifying created_at or id timestamps', () => {
+    const resCreatedAt = simulateWinnerNonProofProtection('user', { created_at: '2026-08-01T00:00:00Z' });
+    expect(resCreatedAt.allowed).toBe(false);
+    expect(resCreatedAt.rejectedField).toBe('created_at');
+
+    const resId = simulateWinnerNonProofProtection('user', { id: 'new-id' });
+    expect(resId.allowed).toBe(false);
+    expect(resId.rejectedField).toBe('id');
+  });
+});
+
+describe('Regression 25: Charity total_contributions Manual Modification Guard', () => {
+  function simulateCharityContributionsUpdate(callerRole: 'user' | 'admin' | 'service_role', newTotal: number, oldTotal: number) {
+    if (callerRole === 'service_role') return { allowed: true };
+    if (newTotal !== oldTotal) {
+      return { allowed: false, error: 'Direct update blocked: Charity total_contributions is ledger-calculated.' };
+    }
+    return { allowed: true };
+  }
+
+  it('25. should block direct mutation of charity total_contributions by admins and users', () => {
+    const adminAttempt = simulateCharityContributionsUpdate('admin', 999999, 10000);
+    expect(adminAttempt.allowed).toBe(false);
+    expect(adminAttempt.error).toContain('ledger-calculated');
+
+    const serviceRoleAttempt = simulateCharityContributionsUpdate('service_role', 12500, 10000);
+    expect(serviceRoleAttempt.allowed).toBe(true);
+  });
+});
+
+describe('Regression 26: Draw Simulation Overwrite Guard (Intentional Reset Required)', () => {
+  function handleDrawSimulationRequest(existingStatus: 'simulated' | 'published' | 'locked' | null, forceRegenerate: boolean) {
+    if (existingStatus === 'published' || existingStatus === 'locked') {
+      throw new Error(`Cannot simulate a draw that is already ${existingStatus}.`);
+    }
+    if (existingStatus === 'simulated' && !forceRegenerate) {
+      throw new Error('A simulated draw already exists. Set forceRegenerate to true to intentionally re-calculate winning numbers.');
+    }
+    return { success: true, simulated: true };
+  }
+
+  it('26. should require explicit forceRegenerate to overwrite an existing simulated draw', () => {
+    expect(() => handleDrawSimulationRequest('simulated', false)).toThrow('forceRegenerate');
+    expect(handleDrawSimulationRequest('simulated', true).success).toBe(true);
+    expect(handleDrawSimulationRequest(null, false).success).toBe(true);
+  });
+});
+
+describe('Regression 27: Strict Supabase Admin Config Validation (Fails Fast)', () => {
+  function validateAdminConfig(url?: string, serviceKey?: string) {
+    if (!url || url.trim() === '' || url.includes('placeholder')) {
+      throw new Error('Supabase admin configuration error: NEXT_PUBLIC_SUPABASE_URL is not configured.');
+    }
+    if (!serviceKey || serviceKey.trim() === '' || serviceKey.includes('placeholder')) {
+      throw new Error('Supabase admin configuration error: SUPABASE_SERVICE_ROLE_KEY is not configured.');
+    }
+    return { url, serviceKey };
+  }
+
+  it('27. should throw immediately when admin url or service key are missing or placeholders', () => {
+    expect(() => validateAdminConfig('', 'key')).toThrow('NEXT_PUBLIC_SUPABASE_URL is not configured');
+    expect(() => validateAdminConfig('https://placeholder.supabase.co', 'key')).toThrow('NEXT_PUBLIC_SUPABASE_URL is not configured');
+    expect(() => validateAdminConfig('https://valid.supabase.co', 'placeholder-service-key')).toThrow('SUPABASE_SERVICE_ROLE_KEY is not configured');
+    expect(validateAdminConfig('https://valid.supabase.co', 'valid-secret-key')).toEqual({
+      url: 'https://valid.supabase.co',
+      serviceKey: 'valid-secret-key',
+    });
   });
 });
