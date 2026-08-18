@@ -219,6 +219,8 @@ export interface DrawActionInput {
   drawMonth?: string;
   drawLogic?: 'random' | 'algorithmic';
   drawId?: string;
+  forceRegenerate?: boolean;
+  entropySeed?: string;
 }
 
 export function validateDrawActionInput(input: unknown): ValidationResult<DrawActionInput> {
@@ -226,7 +228,7 @@ export function validateDrawActionInput(input: unknown): ValidationResult<DrawAc
     return { success: false, error: 'Invalid payload: JSON object expected' };
   }
 
-  const { action, drawMonth, drawLogic, drawId } = input as Record<string, unknown>;
+  const { action, drawMonth, drawLogic, drawId, forceRegenerate, entropySeed } = input as Record<string, unknown>;
 
   if (!action || (action !== 'simulate' && action !== 'publish' && action !== 'lock')) {
     return { success: false, error: 'Invalid action: Must be "simulate", "publish", or "lock"' };
@@ -267,6 +269,8 @@ export function validateDrawActionInput(input: unknown): ValidationResult<DrawAc
         action: 'simulate',
         drawMonth: monthStr,
         drawLogic: logic,
+        forceRegenerate: Boolean(forceRegenerate),
+        entropySeed: typeof entropySeed === 'string' && entropySeed.trim().length > 0 ? entropySeed.trim() : undefined,
       },
     };
   }

@@ -151,4 +151,18 @@ describe('Draw Engine: Mathematical Prize Pool Distribution', () => {
     // Conservation invariant: Total Distributed + Rollover ALWAYS equals Total Prize Pool
     expect(breakdown.totalDistributed + breakdown.rolloverAmount).toBe(totalPool);
   });
+
+  it('should maintain exact mathematical conservation without floating point precision drift', () => {
+    // Test with fractional pool amounts
+    const totalPool = 12345.67;
+    const tierCounts = {
+      '5-match': 2,
+      '4-match': 3,
+      '3-match': 7,
+    };
+
+    const breakdown = calculatePrizePoolDistribution(totalPool, tierCounts);
+    const sum = Number((breakdown.totalDistributed + breakdown.rolloverAmount).toFixed(2));
+    expect(sum).toBe(12345.67);
+  });
 });

@@ -36,11 +36,15 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: validation.error }, { status: 400 });
   }
 
-  const { action, drawMonth, drawLogic, drawId } = validation.data;
+  const { action, drawMonth, drawLogic, drawId, forceRegenerate, entropySeed } = validation.data;
 
   try {
     if (action === 'simulate' && drawMonth) {
-      const result = await simulateMonthlyDraw(drawMonth, drawLogic || 'random');
+      const result = await simulateMonthlyDraw(drawMonth, drawLogic || 'random', {
+        forceRegenerate,
+        entropySeed,
+        actorId: auth.user.id,
+      });
       return NextResponse.json(result);
     }
 

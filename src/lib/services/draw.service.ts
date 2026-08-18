@@ -29,6 +29,26 @@ export interface DrawSimulationResult {
   prizeBreakdown: PrizeBreakdown;
 }
 
+export interface SimulateDrawOptions {
+  forceRegenerate?: boolean;
+  entropySeed?: string;
+  actorId?: string;
+}
+
+/**
+ * Converts a major currency unit (e.g. ₹ or $) to integer minor currency units (paise/cents).
+ */
+export function toCents(amount: number): number {
+  return Math.round(Number(amount) * 100);
+}
+
+/**
+ * Converts integer minor currency units (paise/cents) back to a standard currency number.
+ */
+export function fromCents(cents: number): number {
+  return Math.round(cents) / 100;
+}
+
 /**
  * Generates 5 distinct winning numbers between 1 and 45 using Cryptographically Secure Pseudo-Random Number Generation (CSPRNG)
  */
@@ -42,7 +62,9 @@ export function generateWinningNumbers(count = 5, min = 1, max = 45): number[] {
 }
 
 /**
- * Generates 5 distinct winning numbers deterministically derived from a verifiable SHA-256 hash digest
+ * Deterministically generates 5 distinct winning numbers derived from a verifiable SHA-256 hash digest.
+ * NOTE: This is a deterministic, reproducible verification mechanism for audit and demo purposes.
+ * It is not an independent or unpredictable lottery draw; use CSPRNG (generateWinningNumbers) for live randomized draws.
  */
 export function generateAlgorithmicWinningNumbers(
   drawMonth: string,
@@ -89,43 +111,44 @@ export function evaluateEntry(
 }
 
 /**
- * Calculates mathematical prize breakdown and per-winner distributions:
+ * Calculates mathematical prize breakdown and per-winner distributions using exact integer cents arithmetic:
  * 5-match: 40% (Jackpot)
  * 4-match: 35%
  * 3-match: 25%
- * Explicitly conserves all division residuals and unawarded tier shares into the rollover pool.
+ * Explicitly conserves all division residuals and unawarded tier shares into the rollover pool with zero float drift.
  */
 export function calculatePrizePoolDistribution(
   totalPrizePool: number,
   tierCounts: { '5-match': number; '4-match': number; '3-match': number }
 ): PrizeBreakdown {
-  const pool5 = Math.round(totalPrizePool * 0.40);
-  const pool4 = Math.round(totalPrizePool * 0.35);
-  const pool3 = Math.round(totalPrizePool * 0.25);
+  const poolCents = toCents(totalPrizePool);
+  const pool5Cents = Math.round(poolCents * 0.40);
+  const pool4Cents = Math.round(poolCents * 0.35);
+  const pool3Cents = Math.round(poolCents * 0.25);
 
   const count5 = tierCounts['5-match'];
   const count4 = tierCounts['4-match'];
   const count3 = tierCounts['3-match'];
 
-  const prize5 = count5 > 0 ? Math.floor(pool5 / count5) : 0;
-  const prize4 = count4 > 0 ? Math.floor(pool4 / count4) : 0;
-  const prize3 = count3 > 0 ? Math.floor(pool3 / count3) : 0;
+  const prize5Cents = count5 > 0 ? Math.floor(pool5Cents / count5) : 0;
+  const prize4Cents = count4 > 0 ? Math.floor(pool4Cents / count4) : 0;
+  const prize3Cents = count3 > 0 ? Math.floor(pool3Cents / count3) : 0;
 
-  const distributed5 = count5 * prize5;
-  const distributed4 = count4 * prize4;
-  const distributed3 = count3 * prize3;
-  const totalDistributed = distributed5 + distributed4 + distributed3;
+  const distributed5Cents = count5 * prize5Cents;
+  const distributed4Cents = count4 * prize4Cents;
+  const distributed3Cents = count3 * prize3Cents;
+  const totalDistributedCents = distributed5Cents + distributed4Cents + distributed3Cents;
 
-  // Mathematically conserved: any unawarded pools + integer division residuals roll over
-  const rolloverAmount = Math.max(totalPrizePool - totalDistributed, 0);
+  // Mathematically conserved in exact cents: any unawarded pools + integer division residuals roll over
+  const rolloverCents = Math.max(poolCents - totalDistributedCents, 0);
 
   return {
-    tier5Match: { count: count5, poolShare: pool5, individualPrize: prize5 },
-    tier4Match: { count: count4, poolShare: pool4, individualPrize: prize4 },
-    tier3Match: { count: count3, poolShare: pool3, individualPrize: prize3 },
-    totalPrizePool,
-    totalDistributed,
-    rolloverAmount,
+    tier5Match: { count: count5, poolShare: fromCents(pool5Cents), individualPrize: fromCents(prize5Cents) },
+    tier4Match: { count: count4, poolShare: fromCents(pool4Cents), individualPrize: fromCents(prize4Cents) },
+    tier3Match: { count: count3, poolShare: fromCents(pool3Cents), individualPrize: fromCents(prize3Cents) },
+    totalPrizePool: fromCents(poolCents),
+    totalDistributed: fromCents(totalDistributedCents),
+    rolloverAmount: fromCents(rolloverCents),
   };
 }
 
@@ -133,12 +156,15 @@ export function calculatePrizePoolDistribution(
  * Simulates a monthly draw:
  * 1. Collects active subscribers who have logged exactly 5 scores (strictly eligible).
  * 2. Carries forward any unawarded rollover from the previous published/locked draw.
- * 3. Generates verified winning numbers.
- * 4. Evaluates entries and allocates tier prizes.
+ * 3. Enforces simulation immutability unless forceRegenerate is explicitly requested.
+ * 4. Generates verified winning numbers.
+ * 5. Evaluates entries and allocates tier prizes.
+ * 6. Emits a fail-closed audit log record.
  */
 export async function simulateMonthlyDraw(
   drawMonth: string,
-  drawLogic: 'random' | 'algorithmic' = 'random'
+  drawLogic: 'random' | 'algorithmic' = 'random',
+  options: SimulateDrawOptions = {}
 ): Promise<DrawSimulationResult> {
   const supabase = createAdminClient();
 
@@ -178,13 +204,22 @@ export async function simulateMonthlyDraw(
 
   let drawId = existingDraw?.id;
   let winningNumbers: number[];
+  let isRegeneration = false;
+
+  const seed = options.entropySeed || 'golf_charity_draw_seed';
 
   if (existingDraw) {
     if (existingDraw.status === 'published' || existingDraw.status === 'locked') {
       throw new Error(`Cannot simulate a draw that is already ${existingDraw.status}.`);
     }
+
+    if (!options.forceRegenerate) {
+      throw new Error(`A simulated draw already exists for ${drawMonth}. Set forceRegenerate to true to intentionally re-calculate winning numbers.`);
+    }
+
+    isRegeneration = true;
     winningNumbers = drawLogic === 'algorithmic'
-      ? generateAlgorithmicWinningNumbers(drawMonth)
+      ? generateAlgorithmicWinningNumbers(drawMonth, seed)
       : generateWinningNumbers();
 
     const { error: updateError } = await supabase
@@ -199,7 +234,7 @@ export async function simulateMonthlyDraw(
     if (updateError) throw new Error(`Failed to update simulated draw: ${updateError.message}`);
   } else {
     winningNumbers = drawLogic === 'algorithmic'
-      ? generateAlgorithmicWinningNumbers(drawMonth)
+      ? generateAlgorithmicWinningNumbers(drawMonth, seed)
       : generateWinningNumbers();
 
     const { data: newDraw, error: createError } = await supabase
@@ -260,7 +295,7 @@ export async function simulateMonthlyDraw(
     }
   }
 
-  // 3. Calculate prize allocations
+  // 3. Calculate prize allocations with integer cents conservation
   const tierCounts = {
     '5-match': rawWinners.filter(w => w.matchType === '5-match').length,
     '4-match': rawWinners.filter(w => w.matchType === '4-match').length,
@@ -282,6 +317,25 @@ export async function simulateMonthlyDraw(
       prizeAmount: prize,
       entryNumbers: w.entryNumbers,
     };
+  });
+
+  // 4. Fail-closed audit logging
+  await logAdminAction({
+    actorId: options.actorId,
+    action: isRegeneration ? 'RESET_SIMULATED_DRAW' : 'SIMULATE_DRAW',
+    targetType: 'draws',
+    targetId: drawId,
+    details: {
+      drawMonth,
+      drawLogic,
+      winningNumbers,
+      eligibleSubscribersCount: eligibleCount,
+      prizePool: basePrizePool,
+      winnersCount: evaluatedWinners.length,
+      rolloverAmount: prizeBreakdown.rolloverAmount,
+      isRegeneration,
+    },
+    failClosed: true,
   });
 
   return {

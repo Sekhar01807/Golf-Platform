@@ -29,14 +29,16 @@ export function getSupabaseAdminConfig(): { url: string; serviceKey: string } {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-  if (!url || !serviceKey) {
-    if (process.env.NODE_ENV === 'production') {
-      throw new Error('Supabase admin configuration error: NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required.');
-    }
+  if (!url || url.trim() === '' || url.includes('placeholder')) {
+    throw new Error('Supabase admin configuration error: NEXT_PUBLIC_SUPABASE_URL is not configured.');
+  }
+
+  if (!serviceKey || serviceKey.trim() === '' || serviceKey.includes('placeholder')) {
+    throw new Error('Supabase admin configuration error: SUPABASE_SERVICE_ROLE_KEY is not configured.');
   }
 
   return {
-    url: url || 'https://placeholder.supabase.co',
-    serviceKey: serviceKey || 'placeholder-service-key',
+    url,
+    serviceKey,
   };
 }
