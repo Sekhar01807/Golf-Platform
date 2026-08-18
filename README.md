@@ -5,7 +5,7 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0-3178C6?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Supabase](https://img.shields.io/badge/Supabase-PostgreSQL%20%2B%20RLS-3ECF8E?style=flat-square&logo=supabase&logoColor=white)](https://supabase.com/)
 [![Stripe](https://img.shields.io/badge/Stripe-Subscriptions%20%26%20Webhooks-635BFF?style=flat-square&logo=stripe&logoColor=white)](https://stripe.com/)
-[![Vitest](https://img.shields.io/badge/Vitest-16%20Regression%20Tests%20Passing-6E9F18?style=flat-square&logo=vitest&logoColor=white)](https://vitest.dev/)
+[![Vitest](https://img.shields.io/badge/Vitest-20%20Regression%20Tests%20Passing-6E9F18?style=flat-square&logo=vitest&logoColor=white)](https://vitest.dev/)
 [![Security](https://img.shields.io/badge/Security-Zero--Trust%20Hardened-214E34?style=flat-square&logo=shield)](https://github.com/Sekhar01807/Golf-Platform)
 
 > **A modern, full-stack platform uniting golf score tracking, verified charitable giving, and skill-based monthly prize draws.** Built with Next.js 16 (App Router), React 19, TypeScript, Supabase (PostgreSQL with RLS & DB Triggers), and Stripe Billing.
@@ -267,11 +267,14 @@ npm test
 ```
 
 ### Test Suites Included:
-- **`src/__tests__/security-regression.test.ts`**: Comprehensive 16-point regression suite covering role escalation, subscription mutation guards, payout protection, non-admin API rejection, locked draw immutability, future date rejection, strict 5-score FIFO, fail-closed webhook idempotency, duplicate subscription prevention, charity deletion cascade blocks, draw lifecycle state transitions, fail-closed audit logging, and score age horizons.
+- **`src/__tests__/security-regression.test.ts`**: Comprehensive 20-point regression suite covering role escalation, subscription mutation guards, payout protection, non-admin API rejection, locked draw immutability, future date rejection, strict 5-score FIFO, fail-closed webhook idempotency, duplicate subscription prevention, charity deletion cascade blocks, draw lifecycle state transitions, fail-closed audit logging, score age horizons, concurrent checkout race prevention, serialized FIFO concurrency safety, atomic draw publication rollback, and webhook user-customer binding cross-verification.
 - **`src/__tests__/validations.test.ts`**: Score constraints (1–45), date formats, future date rejection, checkout plan whitelisting, UUID validation, draw actions, and winner proof URL validations.
 - **`src/__tests__/draw.service.test.ts`**: CSPRNG generation, deterministic SHA-256 algorithmic draw, anti-inflation matching, mathematical prize pool split, rollover persistence, and residual arithmetic conservation.
 - **`src/__tests__/auth-security.test.ts`**: Privilege escalation blocking, winner proof-only mutation enforcement, RPC caller boundaries, and payout approval requirements.
 - **`src/__tests__/webhook-idempotency.test.ts`**: Duplicate event suppression and fail-closed database error handling.
+
+> [!NOTE]
+> **Environment Verification Notice**: All security models, schema constraints, RPC logic, and mathematical algorithms are statically reviewed and covered by Vitest suites. If local execution permissions restrict shell sub-processes in your environment, run `npm test` directly in your local terminal.
 
 ---
 

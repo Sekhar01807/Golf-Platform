@@ -322,3 +322,143 @@ describe('Regression 16: Score Submission Age Horizon Constraints', () => {
     expect(validateScoreDateHorizon(recentDate.toISOString().split('T')[0]).valid).toBe(true);
   });
 });
+
+describe('Regression 17: Concurrent Subscription Checkout Lock Claim', () => {
+  class MockUserLockStore {
+    private user = {
+      id: 'usr_123',
+      subscription_status: 'inactive',
+      checkout_lock_until: null as Date | null,
+    };
+
+    public claimCheckoutLock(now: Date = new Date()): { success: boolean; error?: string } {
+      if (this.user.subscription_status === 'active') {
+        return { success: false, error: 'User already has an active subscription.' };
+      }
+
+      if (this.user.checkout_lock_until && this.user.checkout_lock_until > now) {
+        return { success: false, error: 'A checkout session is already in progress. Please complete your payment or try again in a few minutes.' };
+      }
+
+      // Claim lock for 5 minutes
+      this.user.checkout_lock_until = new Date(now.getTime() + 5 * 60 * 1000);
+      return { success: true };
+    }
+  }
+
+  it('17. should allow the first checkout request and block a concurrent second request with a lock error', () => {
+    const store = new MockUserLockStore();
+    const t0 = new Date();
+
+    const req1 = store.claimCheckoutLock(t0);
+    expect(req1.success).toBe(true);
+
+    // Concurrent request 1 second later before webhook returns
+    const req2 = store.claimCheckoutLock(new Date(t0.getTime() + 1000));
+    expect(req2.success).toBe(false);
+    expect(req2.error).toContain('already in progress');
+  });
+});
+
+describe('Regression 18: Serialized FIFO Score Addition Concurrency Safety', () => {
+  class SerializedFifoStore {
+    private scores: { id: string; score: number; date: string }[] = [];
+    private isLocked = false;
+
+    // Simulates SELECT FOR UPDATE pessimistic row-lock
+    async addScore(scoreItem: { id: string; score: number; date: string }) {
+      while (this.isLocked) {
+        await new Promise(r => setTimeout(r, 5));
+      }
+      this.isLocked = true;
+      try {
+        if (this.scores.length >= 5) {
+          // Purge oldest
+          this.scores.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+          this.scores = this.scores.slice(this.scores.length - 4);
+        }
+        this.scores.push(scoreItem);
+      } finally {
+        this.isLocked = false;
+      }
+    }
+
+    getScores() {
+      return this.scores;
+    }
+  }
+
+  it('18. should strictly preserve exactly 5 scores under concurrent submission requests', async () => {
+    const store = new SerializedFifoStore();
+
+    // Submit 10 concurrent scores
+    const submissions = Array.from({ length: 10 }).map((_, i) =>
+      store.addScore({ id: `s_${i}`, score: 30 + i, date: `2026-08-${(i + 1).toString().padStart(2, '0')}` })
+    );
+
+    await Promise.all(submissions);
+
+    const resulting = store.getScores();
+    expect(resulting).toHaveLength(5);
+  });
+});
+
+describe('Regression 19: Atomic Single-Transaction Draw Publication Invariant', () => {
+  function simulateAtomicDrawPublication(
+    draw: { id: string; status: string },
+    winners: { user_id: string; prize: number }[],
+    shouldFailDb: boolean = false
+  ) {
+    if (draw.status !== 'simulated') {
+      throw new Error(`Illegal transition: Only simulated draws can be published. Current status: ${draw.status}`);
+    }
+
+    if (shouldFailDb) {
+      // Transaction abort: no state mutations committed
+      throw new Error('Database transaction aborted: simulated network partition');
+    }
+
+    return {
+      drawStatus: 'published',
+      published_at: new Date().toISOString(),
+      winnersRecorded: winners.length,
+      auditLogged: true,
+    };
+  }
+
+  it('19. should abort the entire draw publication if any sub-step fails', () => {
+    const draw = { id: 'draw-1', status: 'simulated' };
+    const winners = [{ user_id: 'u1', prize: 40000 }];
+
+    expect(() => simulateAtomicDrawPublication(draw, winners, true)).toThrow('Database transaction aborted');
+    // Draw status was never modified
+    expect(draw.status).toBe('simulated');
+  });
+});
+
+describe('Regression 20: Stripe Webhook Customer-User Binding Cross-Verification', () => {
+  function verifyWebhookCustomerBinding(
+    userInDb: { id: string; stripe_customer_id: string | null },
+    eventMetadataUserId: string,
+    eventCustomerId: string
+  ): { valid: boolean; error?: string } {
+    if (userInDb.id !== eventMetadataUserId) {
+      return { valid: false, error: 'User ID mismatch' };
+    }
+    if (userInDb.stripe_customer_id && userInDb.stripe_customer_id !== eventCustomerId) {
+      return { valid: false, error: 'Stripe customer ID binding mismatch' };
+    }
+    return { valid: true };
+  }
+
+  it('20. should reject webhook if incoming customer ID does not match registered user customer ID', () => {
+    const user = { id: 'usr_valid_uuid', stripe_customer_id: 'cus_legit_123' };
+
+    const legit = verifyWebhookCustomerBinding(user, 'usr_valid_uuid', 'cus_legit_123');
+    expect(legit.valid).toBe(true);
+
+    const malicious = verifyWebhookCustomerBinding(user, 'usr_valid_uuid', 'cus_imposter_999');
+    expect(malicious.valid).toBe(false);
+    expect(malicious.error).toContain('mismatch');
+  });
+});

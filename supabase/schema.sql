@@ -30,6 +30,7 @@ CREATE TABLE public.users (
   subscription_plan subscription_plan,
   subscription_start_date TIMESTAMPTZ,
   subscription_end_date TIMESTAMPTZ,
+  checkout_lock_until TIMESTAMPTZ,
   selected_charity_id UUID,
   charity_contribution_percentage INTEGER NOT NULL DEFAULT 10 CHECK (charity_contribution_percentage >= 10 AND charity_contribution_percentage <= 50),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -279,7 +280,38 @@ CREATE TRIGGER protect_draw_winner_fields_trigger
   BEFORE UPDATE ON public.draw_winners
   FOR EACH ROW EXECUTE FUNCTION public.protect_draw_winner_fields();
 
--- C. Enforce 5-Score Maximum Transactionally via FIFO RPC with Caller-Identity Boundary & Integrity Rules
+-- C. Atomic Subscription Checkout Claim (Concurrency Race Condition Guard)
+CREATE OR REPLACE FUNCTION public.claim_checkout_lock(
+  p_user_id UUID
+)
+RETURNS BOOLEAN AS $$
+DECLARE
+  v_user RECORD;
+BEGIN
+  -- Row-lock user to serialize concurrent checkout attempts
+  SELECT * INTO v_user FROM public.users WHERE id = p_user_id FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'User profile not found.';
+  END IF;
+
+  IF v_user.subscription_status = 'active' THEN
+    RAISE EXCEPTION 'User already has an active subscription.';
+  END IF;
+
+  IF v_user.checkout_lock_until IS NOT NULL AND v_user.checkout_lock_until > now() THEN
+    RAISE EXCEPTION 'A checkout session is already in progress. Please complete your payment or try again in a few minutes.';
+  END IF;
+
+  -- Claim 5-minute atomic lock
+  UPDATE public.users
+  SET checkout_lock_until = now() + INTERVAL '5 minutes'
+  WHERE id = p_user_id;
+
+  RETURN true;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
+
+-- D. Enforce 5-Score Maximum Transactionally via FIFO RPC with Caller-Identity Boundary & Concurrency Row Locking
 CREATE OR REPLACE FUNCTION public.add_golf_score(
   p_user_id UUID,
   p_score INT,
@@ -292,7 +324,10 @@ DECLARE
   v_caller_role user_role;
   v_sub_status subscription_status;
 BEGIN
-  -- Caller identity boundary: caller must be authenticated and match target user or have admin/service privileges
+  -- 1. Pessimistic Row Lock: Serializes concurrent score additions for this user
+  PERFORM id FROM public.users WHERE id = p_user_id FOR UPDATE;
+
+  -- 2. Caller identity boundary: caller must be authenticated and match target user or have admin/service privileges
   IF current_user != 'service_role' AND current_setting('request.jwt.claim.role', true) != 'service_role' THEN
     IF auth.uid() IS NULL THEN
       RAISE EXCEPTION 'Authentication required.';
@@ -306,7 +341,7 @@ BEGIN
     END IF;
   END IF;
 
-  -- Validate user existence
+  -- 3. Validate user existence
   SELECT subscription_status INTO v_sub_status FROM public.users WHERE id = p_user_id;
   IF NOT FOUND THEN
     RAISE EXCEPTION 'User profile not found.';
@@ -324,10 +359,10 @@ BEGIN
     RAISE EXCEPTION 'Date played cannot be older than 2 years';
   END IF;
 
-  -- Count existing scores
+  -- 4. Count existing scores under transaction lock
   SELECT COUNT(*) INTO v_count FROM public.golf_scores WHERE user_id = p_user_id;
 
-  -- If 5 or more scores exist, purge the oldest to maintain strict 5-score limit
+  -- 5. If 5 or more scores exist, purge the oldest to maintain strict 5-score limit
   IF v_count >= 5 THEN
     DELETE FROM public.golf_scores
     WHERE id IN (
@@ -346,7 +381,76 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
 
--- D. Atomic Donation Ledger Update (Service-Role Boundary Restricted)
+-- E. Atomic Single-Transaction Draw Publication (ACID Invariant)
+CREATE OR REPLACE FUNCTION public.publish_draw_atomic(
+  p_draw_id UUID,
+  p_winners JSONB,
+  p_rollover NUMERIC,
+  p_actor_id UUID DEFAULT NULL
+)
+RETURNS JSONB AS $$
+DECLARE
+  v_draw RECORD;
+  v_winner JSONB;
+BEGIN
+  -- Lock the draw row for update
+  SELECT * INTO v_draw FROM public.draws WHERE id = p_draw_id FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Draw % not found.', p_draw_id;
+  END IF;
+  IF v_draw.status != 'simulated' THEN
+    RAISE EXCEPTION 'Illegal transition: Only simulated draws can be published. Current status: %', v_draw.status;
+  END IF;
+
+  -- Delete existing winners for this draw if any
+  DELETE FROM public.draw_winners WHERE draw_id = p_draw_id;
+
+  -- Insert all winners atomically
+  FOR v_winner IN SELECT * FROM jsonb_array_elements(p_winners) LOOP
+    INSERT INTO public.draw_winners (
+      draw_id,
+      user_id,
+      match_type,
+      prize_amount,
+      verification_status,
+      payout_status
+    ) VALUES (
+      p_draw_id,
+      (v_winner->>'user_id')::UUID,
+      v_winner->>'match_type',
+      (v_winner->>'prize_amount')::NUMERIC,
+      'pending',
+      'pending'
+    );
+  END LOOP;
+
+  -- Update draw status to published and persist rollover
+  UPDATE public.draws
+  SET status = 'published',
+      published_at = now(),
+      rollover_amount = p_rollover
+  WHERE id = p_draw_id;
+
+  -- Insert audit log in same transaction
+  INSERT INTO public.audit_logs (actor_id, action, target_type, target_id, details)
+  VALUES (
+    p_actor_id,
+    'PUBLISH_DRAW',
+    'draws',
+    p_draw_id::TEXT,
+    jsonb_build_object(
+      'draw_month', v_draw.draw_month,
+      'winners_count', jsonb_array_length(p_winners),
+      'prize_pool', v_draw.total_prize_pool,
+      'rollover_amount', p_rollover
+    )
+  );
+
+  RETURN jsonb_build_object('success', true, 'winners_count', jsonb_array_length(p_winners));
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
+
+-- F. Atomic Donation Ledger Update (Service-Role Boundary Restricted)
 CREATE OR REPLACE FUNCTION public.record_completed_donation(
   p_user_id UUID,
   p_charity_id UUID,
@@ -379,8 +483,27 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
 
--- Explicitly revoke execution on financial RPC from public/anon/authenticated clients
-REVOKE EXECUTE ON FUNCTION public.record_completed_donation(UUID, UUID, NUMERIC, TEXT) FROM PUBLIC, anon, authenticated;
+-- ═══════════════════════════════════════════════════
+-- G. EXPLICIT EXECUTION PRIVILEGE REVOCATIONS & GRANTS
+-- ═══════════════════════════════════════════════════
+
+-- 1. Trigger functions: Internal trigger execution only
+REVOKE ALL ON FUNCTION public.handle_new_user() FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.protect_user_fields() FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.protect_draw_winner_fields() FROM PUBLIC, anon, authenticated;
+
+-- 2. Authenticated user RPCs
+REVOKE ALL ON FUNCTION public.claim_checkout_lock(UUID) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.claim_checkout_lock(UUID) TO authenticated, service_role;
+
+REVOKE ALL ON FUNCTION public.add_golf_score(UUID, INT, DATE) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.add_golf_score(UUID, INT, DATE) TO authenticated, service_role;
+
+-- 3. Service-role administrative and webhook financial RPCs
+REVOKE ALL ON FUNCTION public.publish_draw_atomic(UUID, JSONB, NUMERIC, UUID) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.publish_draw_atomic(UUID, JSONB, NUMERIC, UUID) TO service_role;
+
+REVOKE ALL ON FUNCTION public.record_completed_donation(UUID, UUID, NUMERIC, TEXT) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.record_completed_donation(UUID, UUID, NUMERIC, TEXT) TO service_role;
 
 -- ═══════════════════════════════════════════════════

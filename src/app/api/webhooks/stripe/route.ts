@@ -92,7 +92,24 @@ export async function POST(request: NextRequest) {
         const subscriptionId = typeof session.subscription === 'string' ? session.subscription : null;
         const customerId = typeof session.customer === 'string' ? session.customer : null;
 
-        if (userId && customerId) {
+        if (userId && customerId && isValidUuid(userId)) {
+          // Authoritative user cross-validation
+          const { data: userRecord } = await supabase
+            .from('users')
+            .select('id, stripe_customer_id')
+            .eq('id', userId)
+            .single();
+
+          if (!userRecord) {
+            console.error(`Webhook customer mismatch: User ${userId} not found in database.`);
+            throw new Error(`User ${userId} not found`);
+          }
+
+          if (userRecord.stripe_customer_id && userRecord.stripe_customer_id !== customerId) {
+            console.error(`Webhook customer mismatch: User ${userId} is bound to customer ${userRecord.stripe_customer_id}, but event received ${customerId}.`);
+            throw new Error('Stripe customer ID binding mismatch');
+          }
+
           let endDate: string | null = null;
           let startDate: string = new Date().toISOString();
 
@@ -124,6 +141,7 @@ export async function POST(request: NextRequest) {
             subscription_plan: plan,
             subscription_start_date: startDate,
             subscription_end_date: endDate,
+            checkout_lock_until: null, // Clear checkout lock on successful activation
           }).eq('id', userId);
 
           const { data: user } = await supabase.from('users').select('email, full_name').eq('id', userId).single();
@@ -143,6 +161,18 @@ export async function POST(request: NextRequest) {
         const customerId = typeof subscription.customer === 'string' ? subscription.customer : null;
         if (!customerId) break;
 
+        // Authoritative user verification by customer ID
+        const { data: targetUser } = await supabase
+          .from('users')
+          .select('id, stripe_customer_id')
+          .eq('stripe_customer_id', customerId)
+          .single();
+
+        if (!targetUser) {
+          console.warn(`Webhook subscription updated: No user found for customer ${customerId}`);
+          break;
+        }
+
         const stripeStatus = subscription.status;
         const status = (stripeStatus === 'active' || stripeStatus === 'trialing') ? 'active' :
                        stripeStatus === 'canceled' ? 'cancelled' : 'lapsed';
@@ -161,7 +191,7 @@ export async function POST(request: NextRequest) {
         if (endDate) updatePayload.subscription_end_date = endDate;
         if (startDate) updatePayload.subscription_start_date = startDate;
 
-        await supabase.from('users').update(updatePayload).eq('stripe_customer_id', customerId);
+        await supabase.from('users').update(updatePayload).eq('id', targetUser.id);
         break;
       }
 

@@ -26,19 +26,22 @@ export async function POST(request: NextRequest) {
     const { plan } = validation.data;
     const stripe = getStripe();
 
-    // Get user profile and verify subscription status
-    const { data: profile } = await supabase
-      .from('users')
-      .select('stripe_customer_id, email, full_name, subscription_status')
-      .eq('id', user.id)
-      .single();
-
-    if (profile?.subscription_status === 'active') {
+    // 1. Atomic Concurrency Lock: Checks active status & claims lock under row-lock to prevent race conditions
+    const { error: lockError } = await supabase.rpc('claim_checkout_lock', { p_user_id: user.id });
+    if (lockError) {
+      const isAlreadyActive = lockError.message.toLowerCase().includes('already has an active subscription');
       return NextResponse.json(
-        { error: 'User already has an active subscription. Manage billing via the customer portal.' },
-        { status: 400 }
+        { error: lockError.message },
+        { status: isAlreadyActive ? 400 : 409 }
       );
     }
+
+    // 2. Fetch user profile for customer binding
+    const { data: profile } = await supabase
+      .from('users')
+      .select('stripe_customer_id, email, full_name')
+      .eq('id', user.id)
+      .single();
 
     let customerId = profile?.stripe_customer_id;
 

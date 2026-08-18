@@ -187,7 +187,7 @@ export async function simulateMonthlyDraw(
       ? generateAlgorithmicWinningNumbers(drawMonth)
       : generateWinningNumbers();
 
-    await supabase
+    const { error: updateError } = await supabase
       .from('draws')
       .update({
         winning_numbers: winningNumbers,
@@ -195,6 +195,8 @@ export async function simulateMonthlyDraw(
         draw_logic: drawLogic,
       })
       .eq('id', drawId);
+
+    if (updateError) throw new Error(`Failed to update simulated draw: ${updateError.message}`);
   } else {
     winningNumbers = drawLogic === 'algorithmic'
       ? generateAlgorithmicWinningNumbers(drawMonth)
@@ -212,7 +214,7 @@ export async function simulateMonthlyDraw(
       .select()
       .single();
 
-    if (createError) throw new Error(`Failed to create draw: ${createError.message}`);
+    if (createError || !newDraw) throw new Error(`Failed to create draw: ${createError?.message || 'Unknown creation error'}`);
     drawId = newDraw.id;
   }
 
@@ -221,12 +223,14 @@ export async function simulateMonthlyDraw(
   let eligibleCount = 0;
 
   for (const user of activeUsers) {
-    const { data: scores } = await supabase
+    const { data: scores, error: scoresError } = await supabase
       .from('golf_scores')
       .select('score')
       .eq('user_id', user.id)
       .order('date_played', { ascending: false })
       .limit(5);
+
+    if (scoresError) throw new Error(`Failed to retrieve scores for user ${user.id}: ${scoresError.message}`);
 
     // Business Rule: Member must have logged 5 valid scores to be entered into the draw
     if (!scores || scores.length < 5) {
@@ -236,12 +240,14 @@ export async function simulateMonthlyDraw(
     eligibleCount++;
     const entryNumbers: number[] = scores.map(s => s.score);
 
-    // Upsert draw entry
-    await supabase.from('draw_entries').upsert({
+    // Upsert draw entry with strict error checking
+    const { error: entryError } = await supabase.from('draw_entries').upsert({
       draw_id: drawId,
       user_id: user.id,
       entry_numbers: entryNumbers,
     }, { onConflict: 'draw_id,user_id' });
+
+    if (entryError) throw new Error(`Failed to record draw entry: ${entryError.message}`);
 
     const evaluation = evaluateEntry(entryNumbers, winningNumbers);
     if (evaluation.matchType) {
@@ -289,8 +295,8 @@ export async function simulateMonthlyDraw(
 }
 
 /**
- * Transitions a draw from simulated to published:
- * Uses the authoritative simulated numbers and stored draw entries without recalculating or regenerating winning numbers.
+ * Transitions a draw from simulated to published in a single atomic database transaction:
+ * Uses publish_draw_atomic RPC to lock the draw, record winners, update draw state, persist rollover, and log the audit entry.
  */
 export async function publishDraw(drawId: string, actorId?: string): Promise<{ success: boolean; winnersCount: number }> {
   const supabase = createAdminClient();
@@ -308,10 +314,10 @@ export async function publishDraw(drawId: string, actorId?: string): Promise<{ s
 
   const winningNumbers: number[] = draw.winning_numbers || [];
   if (winningNumbers.length !== 5) {
-    throw new Error('Draw does not have valid 5 winning numbers. Please simulate first.');
+    throw new Error('Draw does not have valid 5 winning numbers');
   }
 
-  // Fetch persisted draw entries for this draw
+  // Load entries and evaluate winners
   const { data: entries, error: entriesError } = await supabase
     .from('draw_entries')
     .select('user_id, entry_numbers')
@@ -340,54 +346,30 @@ export async function publishDraw(drawId: string, actorId?: string): Promise<{ s
 
   const prizeBreakdown = calculatePrizePoolDistribution(Number(draw.total_prize_pool || 10000), tierCounts);
 
-  // Clear previous winners if re-publishing
-  await supabase.from('draw_winners').delete().eq('draw_id', drawId);
+  const winnerRecords = rawWinners.map(w => {
+    let prize = 0;
+    if (w.matchType === '5-match') prize = prizeBreakdown.tier5Match.individualPrize;
+    else if (w.matchType === '4-match') prize = prizeBreakdown.tier4Match.individualPrize;
+    else if (w.matchType === '3-match') prize = prizeBreakdown.tier3Match.individualPrize;
 
-  if (rawWinners.length > 0) {
-    const winnerRecords = rawWinners.map(w => {
-      let prize = 0;
-      if (w.matchType === '5-match') prize = prizeBreakdown.tier5Match.individualPrize;
-      else if (w.matchType === '4-match') prize = prizeBreakdown.tier4Match.individualPrize;
-      else if (w.matchType === '3-match') prize = prizeBreakdown.tier3Match.individualPrize;
-
-      return {
-        draw_id: drawId,
-        user_id: w.userId,
-        match_type: w.matchType,
-        prize_amount: prize,
-        verification_status: 'pending',
-        payout_status: 'pending',
-      };
-    });
-
-    const { error: insertError } = await supabase
-      .from('draw_winners')
-      .insert(winnerRecords);
-
-    if (insertError) throw new Error(`Failed to record winners: ${insertError.message}`);
-  }
-
-  // Update draw status to published and persist rollover amount
-  await supabase
-    .from('draws')
-    .update({
-      status: 'published',
-      published_at: new Date().toISOString(),
-      rollover_amount: prizeBreakdown.rolloverAmount,
-    })
-    .eq('id', drawId);
-
-  await logAdminAction({
-    actorId,
-    action: 'PUBLISH_DRAW',
-    targetType: 'draws',
-    targetId: drawId,
-    details: {
-      drawMonth: draw.draw_month,
-      winnersCount: rawWinners.length,
-      prizePool: draw.total_prize_pool,
-    },
+    return {
+      user_id: w.userId,
+      match_type: w.matchType,
+      prize_amount: prize,
+    };
   });
+
+  // Execute atomic single-transaction publish via PostgreSQL RPC
+  const { error: publishError } = await supabase.rpc('publish_draw_atomic', {
+    p_draw_id: drawId,
+    p_winners: winnerRecords,
+    p_rollover: prizeBreakdown.rolloverAmount,
+    p_actor_id: actorId || null,
+  });
+
+  if (publishError) {
+    throw new Error(`Atomic draw publication failed: ${publishError.message}`);
+  }
 
   return { success: true, winnersCount: rawWinners.length };
 }
@@ -409,17 +391,24 @@ export async function lockDraw(drawId: string, actorId?: string): Promise<{ succ
     throw new Error(`Cannot lock a draw with status "${draw.status}". Only published draws can be locked.`);
   }
 
-  await supabase
+  const { error: lockError } = await supabase
     .from('draws')
     .update({ status: 'locked' })
     .eq('id', drawId);
+
+  if (lockError) throw new Error(`Failed to lock draw: ${lockError.message}`);
 
   await logAdminAction({
     actorId,
     action: 'LOCK_DRAW',
     targetType: 'draws',
     targetId: drawId,
-    details: { drawMonth: draw.draw_month },
+    details: {
+      drawMonth: draw.draw_month,
+      prizePool: draw.total_prize_pool,
+      rolloverAmount: draw.rollover_amount,
+    },
+    failClosed: true,
   });
 
   return { success: true };
