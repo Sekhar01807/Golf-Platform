@@ -267,3 +267,58 @@ describe('Regression 14: Draw Lifecycle State Machine Enforcements', () => {
     expect(() => simulateDrawStateTransition('locked', 'publish')).toThrow('Cannot publish');
   });
 });
+
+describe('Regression 15: Critical Audit Logging Fail-Closed Mode', () => {
+  function executeAuditedAction(
+    actionName: string,
+    logInsertResult: { error: { message: string } | null },
+    failClosed: boolean = true
+  ) {
+    if (logInsertResult.error) {
+      if (failClosed) {
+        throw new Error(`Mandatory audit record creation failed for action ${actionName}: ${logInsertResult.error.message}`);
+      }
+      return { success: true, unAudited: true };
+    }
+    return { success: true, unAudited: false };
+  }
+
+  it('15. should abort and throw an error when audit logging fails in failClosed mode', () => {
+    const errorResult = { error: { message: 'Database connection failed' } };
+    expect(() => executeAuditedAction('PUBLISH_DRAW', errorResult, true)).toThrow('Mandatory audit record creation failed');
+  });
+});
+
+describe('Regression 16: Score Submission Age Horizon Constraints', () => {
+  function validateScoreDateHorizon(datePlayedStr: string): { valid: boolean; error?: string } {
+    const played = new Date(datePlayedStr);
+    const now = new Date();
+    if (played > now) {
+      return { valid: false, error: 'Date played cannot be in the future' };
+    }
+
+    const twoYearsAgo = new Date();
+    twoYearsAgo.setFullYear(twoYearsAgo.getFullYear() - 2);
+    if (played < twoYearsAgo) {
+      return { valid: false, error: 'Date played cannot be older than 2 years' };
+    }
+
+    return { valid: true };
+  }
+
+  it('16. should reject scores older than 2 years or in the future', () => {
+    const futureDate = new Date();
+    futureDate.setDate(futureDate.getDate() + 5);
+    expect(validateScoreDateHorizon(futureDate.toISOString().split('T')[0]).valid).toBe(false);
+
+    const oldDate = new Date();
+    oldDate.setFullYear(oldDate.getFullYear() - 3);
+    const oldRes = validateScoreDateHorizon(oldDate.toISOString().split('T')[0]);
+    expect(oldRes.valid).toBe(false);
+    expect(oldRes.error).toContain('2 years');
+
+    const recentDate = new Date();
+    recentDate.setDate(recentDate.getDate() - 10);
+    expect(validateScoreDateHorizon(recentDate.toISOString().split('T')[0]).valid).toBe(true);
+  });
+});

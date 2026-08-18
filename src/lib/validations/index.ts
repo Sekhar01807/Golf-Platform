@@ -163,6 +163,28 @@ export function isValidUuid(id: unknown): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
 }
 
+export function validateProofUrl(url: unknown): ValidationResult<string> {
+  if (typeof url !== 'string' || url.trim().length === 0) {
+    return { success: false, error: 'A scorecard proof URL is required' };
+  }
+
+  const trimmed = url.trim();
+  if (trimmed.length > 500) {
+    return { success: false, error: 'Proof URL exceeds maximum allowed length of 500 characters' };
+  }
+
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return { success: false, error: 'Proof URL must use HTTP or HTTPS protocol' };
+    }
+  } catch {
+    return { success: false, error: 'Proof URL must be a valid, well-formed web URL' };
+  }
+
+  return { success: true, data: trimmed };
+}
+
 export function validateWinnerUpdateInput(input: unknown): ValidationResult<WinnerStatusUpdateInput> {
   if (!input || typeof input !== 'object') {
     return { success: false, error: 'Invalid payload: JSON object expected' };

@@ -110,6 +110,7 @@ CREATE TABLE public.draws (
   draw_logic draw_type NOT NULL DEFAULT 'random',
   winning_numbers INTEGER[] NOT NULL DEFAULT '{}',
   total_prize_pool NUMERIC NOT NULL DEFAULT 0,
+  rollover_amount NUMERIC NOT NULL DEFAULT 0 CHECK (rollover_amount >= 0),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   published_at TIMESTAMPTZ
 );
@@ -140,7 +141,8 @@ CREATE TABLE public.draw_winners (
   payout_status payout_status NOT NULL DEFAULT 'pending',
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE(draw_id, user_id),
-  CONSTRAINT chk_draw_winners_payout_verified CHECK (payout_status != 'paid' OR verification_status = 'approved')
+  CONSTRAINT chk_draw_winners_payout_verified CHECK (payout_status != 'paid' OR verification_status = 'approved'),
+  CONSTRAINT chk_draw_winners_proof_url CHECK (winner_proof_url IS NULL OR winner_proof_url ~* '^https?://[^\s/$.?#].[^\s]*$')
 );
 
 -- ═══════════════════════════════════════════════════
@@ -277,7 +279,7 @@ CREATE TRIGGER protect_draw_winner_fields_trigger
   BEFORE UPDATE ON public.draw_winners
   FOR EACH ROW EXECUTE FUNCTION public.protect_draw_winner_fields();
 
--- C. Enforce 5-Score Maximum Transactionally via FIFO RPC with Caller-Identity Boundary
+-- C. Enforce 5-Score Maximum Transactionally via FIFO RPC with Caller-Identity Boundary & Integrity Rules
 CREATE OR REPLACE FUNCTION public.add_golf_score(
   p_user_id UUID,
   p_score INT,
@@ -288,6 +290,7 @@ DECLARE
   v_score_id UUID;
   v_count INT;
   v_caller_role user_role;
+  v_sub_status subscription_status;
 BEGIN
   -- Caller identity boundary: caller must be authenticated and match target user or have admin/service privileges
   IF current_user != 'service_role' AND current_setting('request.jwt.claim.role', true) != 'service_role' THEN
@@ -303,12 +306,22 @@ BEGIN
     END IF;
   END IF;
 
+  -- Validate user existence
+  SELECT subscription_status INTO v_sub_status FROM public.users WHERE id = p_user_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'User profile not found.';
+  END IF;
+
   IF p_score < 1 OR p_score > 45 THEN
     RAISE EXCEPTION 'Score must be between 1 and 45 (Stableford format)';
   END IF;
 
   IF p_date_played > CURRENT_DATE THEN
     RAISE EXCEPTION 'Date played cannot be in the future';
+  END IF;
+
+  IF p_date_played < CURRENT_DATE - INTERVAL '2 years' THEN
+    RAISE EXCEPTION 'Date played cannot be older than 2 years';
   END IF;
 
   -- Count existing scores

@@ -6,10 +6,12 @@ export interface AuditActionPayload {
   targetType: string;
   targetId?: string | null;
   details?: Record<string, unknown>;
+  failClosed?: boolean;
 }
 
 /**
- * Persists an immutable administrative audit record
+ * Persists an immutable administrative audit record.
+ * Fails closed by default to guarantee full auditability of sensitive admin state mutations.
  */
 export async function logAdminAction({
   actorId,
@@ -17,17 +19,21 @@ export async function logAdminAction({
   targetType,
   targetId,
   details = {},
+  failClosed = true,
 }: AuditActionPayload): Promise<void> {
-  try {
-    const supabase = createAdminClient();
-    await supabase.from('audit_logs').insert({
-      actor_id: actorId || null,
-      action,
-      target_type: targetType,
-      target_id: targetId ? String(targetId) : null,
-      details,
-    });
-  } catch (err) {
-    console.error('[Audit Log Failure]:', err);
+  const supabase = createAdminClient();
+  const { error } = await supabase.from('audit_logs').insert({
+    actor_id: actorId || null,
+    action,
+    target_type: targetType,
+    target_id: targetId ? String(targetId) : null,
+    details,
+  });
+
+  if (error) {
+    console.error('[Critical Audit Log Failure]:', error);
+    if (failClosed) {
+      throw new Error(`Mandatory audit record creation failed for action ${action}: ${error.message}`);
+    }
   }
 }

@@ -53,6 +53,7 @@ export interface Draw {
   draw_logic: DrawType;
   winning_numbers: number[];
   total_prize_pool: number;
+  rollover_amount: number;
   created_at: string;
   published_at: string | null;
 }

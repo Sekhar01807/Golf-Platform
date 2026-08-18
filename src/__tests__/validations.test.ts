@@ -5,6 +5,9 @@ import {
   validateDonationInput,
   validateCharityInput,
   validateWinnerUpdateInput,
+  validateDrawActionInput,
+  isValidUuid,
+  validateProofUrl,
 } from '../lib/validations';
 
 describe('Validation Suite: Score Submissions', () => {
@@ -160,5 +163,29 @@ describe('Validation Suite: Admin Draw Actions', () => {
 
   it('should reject unsupported actions', () => {
     expect(validateDrawActionInput({ action: 'delete' }).success).toBe(false);
+  });
+});
+
+describe('Validation Suite: Winner Proof URL Validation', () => {
+  it('should accept valid HTTPS image/web URLs', () => {
+    expect(validateProofUrl('https://example.com/scorecards/aug2026.png').success).toBe(true);
+    expect(validateProofUrl('https://storage.googleapis.com/proofs/card-123.jpg').success).toBe(true);
+  });
+
+  it('should accept HTTP URLs in development/testing', () => {
+    expect(validateProofUrl('http://localhost:3000/proofs/test.png').success).toBe(true);
+  });
+
+  it('should reject non-HTTP/HTTPS protocols and dangerous schemas', () => {
+    expect(validateProofUrl('javascript:alert(1)').success).toBe(false);
+    expect(validateProofUrl('data:text/html,<script>alert(1)</script>').success).toBe(false);
+    expect(validateProofUrl('ftp://files.example.com/proof.png').success).toBe(false);
+  });
+
+  it('should reject non-string and empty inputs', () => {
+    expect(validateProofUrl('').success).toBe(false);
+    expect(validateProofUrl('   ').success).toBe(false);
+    expect(validateProofUrl(null).success).toBe(false);
+    expect(validateProofUrl(12345).success).toBe(false);
   });
 });

@@ -88,10 +88,11 @@ export async function POST(request: NextRequest) {
 
         // B. Handle Subscription Checkout
         const userId = metadata.user_id;
-        const plan = metadata.plan as 'monthly' | 'yearly';
+        const plan = (metadata.plan === 'yearly' ? 'yearly' : 'monthly') as 'monthly' | 'yearly';
         const subscriptionId = typeof session.subscription === 'string' ? session.subscription : null;
+        const customerId = typeof session.customer === 'string' ? session.customer : null;
 
-        if (userId) {
+        if (userId && customerId) {
           let endDate: string | null = null;
           let startDate: string = new Date().toISOString();
 
@@ -101,8 +102,11 @@ export async function POST(request: NextRequest) {
               if ((subObj as any).current_period_end) {
                 endDate = new Date((subObj as any).current_period_end * 1000).toISOString();
               }
+              if ((subObj as any).current_period_start) {
+                startDate = new Date((subObj as any).current_period_start * 1000).toISOString();
+              }
             } catch (subErr) {
-              console.warn('Could not fetch subscription dates directly:', subErr);
+              console.warn('Could not fetch subscription dates directly from Stripe:', subErr);
             }
           }
 
@@ -114,10 +118,10 @@ export async function POST(request: NextRequest) {
           }
 
           await supabase.from('users').update({
-            stripe_customer_id: session.customer as string,
+            stripe_customer_id: customerId,
             stripe_subscription_id: subscriptionId,
             subscription_status: 'active',
-            subscription_plan: plan || 'monthly',
+            subscription_plan: plan,
             subscription_start_date: startDate,
             subscription_end_date: endDate,
           }).eq('id', userId);
@@ -135,26 +139,36 @@ export async function POST(request: NextRequest) {
       }
 
       case 'customer.subscription.updated': {
-        const subscription = event.data.object as any;
-        const customerId = subscription.customer as string;
-        const status = subscription.status === 'active' ? 'active' :
-                       subscription.status === 'canceled' ? 'cancelled' : 'lapsed';
+        const subscription = event.data.object as Stripe.Subscription;
+        const customerId = typeof subscription.customer === 'string' ? subscription.customer : null;
+        if (!customerId) break;
 
-        const endDate = subscription.current_period_end
-          ? new Date(subscription.current_period_end * 1000).toISOString()
+        const stripeStatus = subscription.status;
+        const status = (stripeStatus === 'active' || stripeStatus === 'trialing') ? 'active' :
+                       stripeStatus === 'canceled' ? 'cancelled' : 'lapsed';
+
+        const endDate = (subscription as any).current_period_end
+          ? new Date((subscription as any).current_period_end * 1000).toISOString()
+          : null;
+        const startDate = (subscription as any).current_period_start
+          ? new Date((subscription as any).current_period_start * 1000).toISOString()
           : null;
 
-        await supabase.from('users').update({
+        const updatePayload: Record<string, unknown> = {
           stripe_subscription_id: subscription.id,
           subscription_status: status,
-          subscription_end_date: endDate,
-        }).eq('stripe_customer_id', customerId);
+        };
+        if (endDate) updatePayload.subscription_end_date = endDate;
+        if (startDate) updatePayload.subscription_start_date = startDate;
+
+        await supabase.from('users').update(updatePayload).eq('stripe_customer_id', customerId);
         break;
       }
 
       case 'customer.subscription.deleted': {
-        const subscription = event.data.object as any;
-        const customerId = subscription.customer as string;
+        const subscription = event.data.object as Stripe.Subscription;
+        const customerId = typeof subscription.customer === 'string' ? subscription.customer : null;
+        if (!customerId) break;
 
         await supabase.from('users').update({
           subscription_status: 'cancelled',
@@ -164,20 +178,38 @@ export async function POST(request: NextRequest) {
       }
 
       case 'invoice.payment_succeeded': {
-        const invoice = event.data.object as any;
-        const customerId = invoice.customer as string;
+        const invoice = event.data.object as Stripe.Invoice;
+        const customerId = typeof invoice.customer === 'string' ? invoice.customer : null;
+        const subscriptionId = typeof (invoice as any).subscription === 'string' ? (invoice as any).subscription : null;
 
         if (customerId) {
-          await supabase.from('users').update({
+          let endDate: string | null = null;
+          if (subscriptionId) {
+            try {
+              const subObj = await stripe.subscriptions.retrieve(subscriptionId);
+              if ((subObj as any).current_period_end) {
+                endDate = new Date((subObj as any).current_period_end * 1000).toISOString();
+              }
+            } catch (err) {
+              console.warn('Could not retrieve subscription on invoice payment:', err);
+            }
+          }
+
+          const updatePayload: Record<string, unknown> = {
             subscription_status: 'active',
-          }).eq('stripe_customer_id', customerId);
+          };
+          if (endDate) {
+            updatePayload.subscription_end_date = endDate;
+          }
+
+          await supabase.from('users').update(updatePayload).eq('stripe_customer_id', customerId);
         }
         break;
       }
 
       case 'invoice.payment_failed': {
-        const invoice = event.data.object as any;
-        const customerId = invoice.customer as string;
+        const invoice = event.data.object as Stripe.Invoice;
+        const customerId = typeof invoice.customer === 'string' ? invoice.customer : null;
 
         if (customerId) {
           await supabase.from('users').update({

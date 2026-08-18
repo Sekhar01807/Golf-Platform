@@ -1,8 +1,44 @@
 import Link from 'next/link';
 import Image from 'next/image';
 import styles from './page.module.css';
+import { createClient } from '@/lib/supabase/server';
 
-export default function HomePage() {
+export default async function HomePage() {
+  let totalImpact = '₹8,41,000';
+  let activeMembersCount = '100+';
+  let verifiedDrawsCount = '100%';
+  let winnersRewardedCount = '12+';
+  let isLiveMetrics = false;
+
+  try {
+    const supabase = await createClient();
+    const [charitiesRes, usersRes, winnersRes] = await Promise.all([
+      supabase.from('charities').select('total_contributions'),
+      supabase.from('users').select('id', { count: 'exact', head: true }).eq('subscription_status', 'active'),
+      supabase.from('draw_winners').select('id', { count: 'exact', head: true }),
+    ]);
+
+    if (charitiesRes.data && charitiesRes.data.length > 0) {
+      const sum = charitiesRes.data.reduce((acc, c) => acc + (Number(c.total_contributions) || 0), 0);
+      if (sum > 0) {
+        totalImpact = `₹${sum.toLocaleString('en-IN')}`;
+        isLiveMetrics = true;
+      }
+    }
+
+    if (usersRes.count !== null && usersRes.count > 0) {
+      activeMembersCount = `${usersRes.count}`;
+      isLiveMetrics = true;
+    }
+
+    if (winnersRes.count !== null && winnersRes.count > 0) {
+      winnersRewardedCount = `${winnersRes.count}`;
+      isLiveMetrics = true;
+    }
+  } catch (err) {
+    console.warn('Could not fetch dynamic homepage metrics, using benchmark data:', err);
+  }
+
   const steps = [
     {
       num: '01',
@@ -163,22 +199,25 @@ export default function HomePage() {
         <div className="container">
           <div className={styles.statsGrid}>
             <div className={styles.statItem}>
-              <div className={styles.statValue}>₹45,00,000+</div>
-              <div className={styles.statLabel}>Charity Impact</div>
+              <div className={styles.statValue}>{totalImpact}</div>
+              <div className={styles.statLabel}>Charity Contributions</div>
             </div>
             <div className={styles.statItem}>
-              <div className={styles.statValue}>2,500+</div>
+              <div className={styles.statValue}>{activeMembersCount}</div>
               <div className={styles.statLabel}>Active Members</div>
             </div>
             <div className={styles.statItem}>
-              <div className={styles.statValue}>100%</div>
-              <div className={styles.statLabel}>Verified Draws</div>
+              <div className={styles.statValue}>{verifiedDrawsCount}</div>
+              <div className={styles.statLabel}>Cryptographic Verification</div>
             </div>
             <div className={styles.statItem}>
-              <div className={styles.statValue}>150+</div>
-              <div className={styles.statLabel}>Winners Rewarded</div>
+              <div className={styles.statValue}>{winnersRewardedCount}</div>
+              <div className={styles.statLabel}>Winners Recorded</div>
             </div>
           </div>
+          <p style={{ textAlign: 'center', fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: '1rem' }}>
+            {isLiveMetrics ? '● Live platform verified metrics' : '✦ Demo benchmark metrics for demonstration'}
+          </p>
         </div>
       </section>
 

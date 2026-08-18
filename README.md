@@ -94,6 +94,7 @@ erDiagram
         string stripe_subscription_id
         subscription_status subscription_status "active | inactive | cancelled | lapsed"
         subscription_plan subscription_plan "monthly | yearly"
+        timestamptz subscription_start_date
         timestamptz subscription_end_date
         uuid selected_charity_id FK
         integer charity_contribution_percentage "10 to 50"
@@ -120,8 +121,9 @@ erDiagram
         date draw_month UK
         draw_status status "simulated | published | locked"
         draw_type draw_logic "random | algorithmic"
-        integer_array winning_numbers "5 unique numbers"
+        integer_array winning_numbers "5 unique numbers (1-45)"
         numeric total_prize_pool
+        numeric rollover_amount "conserved jackpot rollover"
         timestamptz published_at
     }
 
@@ -157,31 +159,36 @@ erDiagram
 
 ## 🛡️ Zero-Trust Security & Authorization Architecture
 
-1. **Privilege Escalation Prevention (`protect_user_fields`)**:
+1. **Caller-Identity Boundary on RPCs (`add_golf_score`, `record_completed_donation`)**:
+   - `add_golf_score` checks `auth.uid() = p_user_id` or admin/service role to prevent unauthorized score insertion for other accounts.
+   - `record_completed_donation` is strictly restricted to `service_role` and execution is revoked from public/anon users.
+   - All `SECURITY DEFINER` functions explicitly set `SET search_path = public, pg_temp;` to mitigate search-path hijacking.
+2. **Privilege Escalation Prevention (`protect_user_fields`)**:
    - PostgreSQL `BEFORE UPDATE` triggers prevent authenticated users from modifying sensitive columns (`role`, `subscription_status`, `subscription_plan`, `stripe_customer_id`, `stripe_subscription_id`, `subscription_end_date`).
    - Normal users may only modify non-sensitive profile fields (`full_name`, `selected_charity_id`, `charity_contribution_percentage`).
-2. **Server-Side Administrative Verification (`requireAdmin`)**:
-   - Server-side guard function queries the database to verify active session AND `users.role === 'admin'`.
-   - Admin routes, server pages, and administrative APIs (`/api/admin/*`) reject unauthorized attempts with 401/403 or redirects.
-3. **Winner Mutation Lockdown (`protect_draw_winner_fields`)**:
-   - Non-admin users are strictly restricted to updating `winner_proof_url` and only while `verification_status = 'pending'`. Direct tampering with `prize_amount`, `match_type`, `verification_status`, or `payout_status` is blocked at the database trigger level.
-4. **Stripe Webhook Idempotency (`stripe_events`)**:
-   - Every incoming Stripe event is checked against the `stripe_events` table before processing, preventing duplicate execution and replay vulnerabilities.
-5. **Transactional 5-Score FIFO Limit (`add_golf_score`)**:
-   - Stableford score insertions are bounded by PostgreSQL logic ensuring that only the 5 most recent scores are active per user. Unsafe non-atomic application fallbacks are eliminated.
-6. **Input Validation**:
-   - All API endpoints validate payloads with strict schema validators (checking integers, ranges, future dates, UUIDs, and whitelisted enum plans).
+3. **Winner Mutation Lockdown & Server Payout Invariant**:
+   - Non-admin users are strictly restricted to updating `winner_proof_url` and only while `verification_status = 'pending'`.
+   - Direct database CHECK constraint (`chk_draw_winners_payout_verified`) and API-level validation enforce that `payout_status = 'paid'` is impossible unless `verification_status = 'approved'`.
+4. **Fail-Closed Stripe Webhook Idempotency**:
+   - Webhook processing establishes an idempotent claim in `stripe_events`. Duplicate events return HTTP 200, while unexpected database failures return HTTP 500 to trigger safe Stripe retries.
+5. **Transactional 5-Score FIFO Limit**:
+   - Stableford score insertions maintain exactly the 5 most recent rounds per user. User existence and historical dates within 2 years are verified.
+6. **Immutable Audit Logging**:
+   - Critical administrative actions (draw publication, draw lockdown, winner verification, charity management) fail closed to guarantee persistent auditability.
 
 ---
 
 ## 🎰 Draw Engine & Prize Pool Mechanics
 
-- **Authentic Eligibility**: Only active subscribers who have logged all 5 valid rounds enter the draw (no fabricated or placeholder numbers).
-- **Winning Numbers Generation**: Generates 5 distinct random numbers between 1 and 45 (Stableford scale).
-- **Match Tiers**:
-  - **5-Number Match (Jackpot)**: Allocated **40%** of the prize pool (rolls over if 0 winners).
+- **Authentic Eligibility**: Only active subscribers who have logged all 5 valid rounds enter the draw.
+- **Cryptographically Secure Randomness**: Node.js `crypto.randomInt` (CSPRNG) is used for standard draws, eliminating pseudo-random bias.
+- **Deterministic Algorithmic Draws**: Seeded SHA-256 cryptographic digest derivation provides reproducible, mathematically auditable winning numbers.
+- **Anti-Inflation Score Matching**: Member scores are deduplicated prior to comparison against drawn numbers (`[7, 7, 7, 7, 7]` matches winning 7 exactly once, not five times).
+- **Match Tiers & Rollover Conservation**:
+  - **5-Number Match (Jackpot)**: Allocated **40%** of the prize pool (rolls over to the next month if 0 winners).
   - **4-Number Match**: Allocated **35%** of the prize pool (split equally among tier winners).
   - **3-Number Match**: Allocated **25%** of the prize pool (split equally among tier winners).
+  - **Residual Conservation**: All integer division remainders and unawarded tier pools are explicitly conserved into `rollover_amount` and carried forward into subsequent monthly draw prize pools.
 - **Authoritative Simulation & Lifecycle**:
   $$\text{SIMULATED} \longrightarrow \text{PUBLISHED} \longrightarrow \text{LOCKED (Immutable)}$$
   The persisted simulation result is authoritative. Once published, the exact numbers and winners reviewed by the administrator are committed without re-rolling. Once locked, the draw is permanently frozen.
@@ -194,9 +201,9 @@ erDiagram
 - **Language**: TypeScript 5
 - **UI & Styling**: Vanilla CSS Design System with Curated Golf Palette (`#214E34` deep golf green, `#6B8E72` sage, `#D4A84F` gold, `#F7F8F5` background)
 - **Database & Auth**: Supabase PostgreSQL, SSR Cookie Auth, Row Level Security (RLS)
-- **Payments & Billing**: Stripe Checkout, Stripe Billing Portal, Webhook Handlers
-- **Testing**: Vitest 3.0 (Unit, Validation, Security Barrier & Idempotency suites)
-- **Transactional Email**: Resend API
+- **Payments & Billing**: Stripe Checkout, Stripe Billing Portal, Authoritative Webhook Handlers
+- **Testing**: Vitest 3.0 (Unit, Validation, Security Barrier, Idempotency & Lifecycle suites)
+- **Transactional Email**: Resend API with verified sender domain support
 
 ---
 
@@ -211,23 +218,24 @@ erDiagram
 Create `.env.local` in the root directory (see `.env.example`):
 
 ```env
-# Supabase Configuration
+# ── Supabase Database & Auth ──
 NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
-SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-public-key
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-private-key
 
-# Stripe Configuration
+# ── Stripe Payments & Webhooks ──
 STRIPE_SECRET_KEY=sk_test_...
 STRIPE_WEBHOOK_SECRET=whsec_...
 NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_test_...
-STRIPE_MONTHLY_PRICE_ID=price_monthly_...
-STRIPE_YEARLY_PRICE_ID=price_yearly_...
+STRIPE_MONTHLY_PRICE_ID=price_...
+STRIPE_YEARLY_PRICE_ID=price_...
 
-# Application URL
+# ── Application URL ──
 NEXT_PUBLIC_APP_URL=http://localhost:3000
 
-# Email (Optional)
+# ── Transactional Email (Optional in dev) ──
 RESEND_API_KEY=re_...
+EMAIL_FROM=Golf Platform <notifications@golfforgood.org>
 ```
 
 ### 3. Database Migration
@@ -251,11 +259,11 @@ npm test
 ```
 
 ### Test Suites Included:
-- **`src/__tests__/security-regression.test.ts`**: Complete 10-point regression suite covering role escalation blocking, subscription mutation guards, payout protection, non-admin API rejection, locked draw immutability, future date rejection, strict 5-score FIFO, webhook idempotency, and atomic donation ledger sync.
-- **`src/__tests__/validations.test.ts`**: Score constraints (1–45), date formats, future date rejection, checkout plan whitelisting, donation UUID & bounds.
-- **`src/__tests__/draw.service.test.ts`**: Winning number uniqueness, 5/4/3-match tier evaluation, mathematical prize pool split & rollover calculations.
-- **`src/__tests__/auth-security.test.ts`**: Privilege escalation blocking, winner proof-only mutation enforcement, admin guard contracts.
-- **`src/__tests__/webhook-idempotency.test.ts`**: Duplicate event suppression and single-flight processing.
+- **`src/__tests__/security-regression.test.ts`**: Comprehensive 14-point regression suite covering role escalation, subscription mutation guards, payout protection, non-admin API rejection, locked draw immutability, future date rejection, strict 5-score FIFO, fail-closed webhook idempotency, duplicate subscription prevention, charity deletion cascade blocks, and draw lifecycle state transitions.
+- **`src/__tests__/validations.test.ts`**: Score constraints (1–45), date formats, future date rejection, checkout plan whitelisting, UUID validation, draw actions, and winner proof URL validations.
+- **`src/__tests__/draw.service.test.ts`**: CSPRNG generation, deterministic SHA-256 algorithmic draw, anti-inflation matching, mathematical prize pool split, rollover persistence, and residual arithmetic conservation.
+- **`src/__tests__/auth-security.test.ts`**: Privilege escalation blocking, winner proof-only mutation enforcement, RPC caller boundaries, and payout approval requirements.
+- **`src/__tests__/webhook-idempotency.test.ts`**: Duplicate event suppression and fail-closed database error handling.
 
 ---
 

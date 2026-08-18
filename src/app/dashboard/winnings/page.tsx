@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useToast } from '@/components/Toast/Toast';
+import { validateProofUrl } from '@/lib/validations';
 
 export default function WinningsPage() {
   const supabase = createClient();
@@ -24,19 +25,19 @@ export default function WinningsPage() {
         data: { user },
       } = await supabase.auth.getUser();
 
-      if (user) {
-        const { data, error } = await supabase
-          .from('draw_winners')
-          .select('id, match_type, prize_amount, verification_status, payout_status, winner_proof_url, created_at, draws(draw_month)')
-          .eq('user_id', user.id)
-          .order('created_at', { ascending: false });
+      if (!user) return;
 
-        if (error) throw error;
-        setWinnings(data || []);
-      }
-    } catch (err) {
-      console.error('Failed to load winnings:', err);
-      showToast('Failed to load winnings data', 'error');
+      const { data, error } = await supabase
+        .from('draw_winners')
+        .select('id, match_type, prize_amount, verification_status, payout_status, winner_proof_url, created_at, draws(draw_month)')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      setWinnings(data || []);
+    } catch (err: any) {
+      console.error('Fetch winnings error:', err);
+      showToast('Failed to load your prize winnings', 'error');
     } finally {
       setLoading(false);
     }
@@ -44,8 +45,14 @@ export default function WinningsPage() {
 
   const handleUploadProof = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedWinnerId || !proofUrl.trim()) {
-      showToast('Please provide a valid image URL for scorecard proof', 'warning');
+    if (!selectedWinnerId) {
+      showToast('Please select a winning record to upload proof', 'warning');
+      return;
+    }
+
+    const validation = validateProofUrl(proofUrl);
+    if (!validation.success || !validation.data) {
+      showToast(validation.error || 'Invalid proof URL provided', 'warning');
       return;
     }
 
@@ -54,7 +61,7 @@ export default function WinningsPage() {
       // Normal user can only update winner_proof_url on their own pending winning row
       const { error } = await supabase
         .from('draw_winners')
-        .update({ winner_proof_url: proofUrl.trim() })
+        .update({ winner_proof_url: validation.data })
         .eq('id', selectedWinnerId)
         .eq('verification_status', 'pending');
 

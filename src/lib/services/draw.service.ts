@@ -93,6 +93,7 @@ export function evaluateEntry(
  * 5-match: 40% (Jackpot)
  * 4-match: 35%
  * 3-match: 25%
+ * Explicitly conserves all division residuals and unawarded tier shares into the rollover pool.
  */
 export function calculatePrizePoolDistribution(
   totalPrizePool: number,
@@ -106,12 +107,17 @@ export function calculatePrizePoolDistribution(
   const count4 = tierCounts['4-match'];
   const count3 = tierCounts['3-match'];
 
-  const prize5 = count5 > 0 ? Math.round(pool5 / count5) : 0;
-  const prize4 = count4 > 0 ? Math.round(pool4 / count4) : 0;
-  const prize3 = count3 > 0 ? Math.round(pool3 / count3) : 0;
+  const prize5 = count5 > 0 ? Math.floor(pool5 / count5) : 0;
+  const prize4 = count4 > 0 ? Math.floor(pool4 / count4) : 0;
+  const prize3 = count3 > 0 ? Math.floor(pool3 / count3) : 0;
 
-  const totalDistributed = (count5 * prize5) + (count4 * prize4) + (count3 * prize3);
-  const rolloverAmount = (count5 === 0 ? pool5 : 0) + (count4 === 0 ? pool4 : 0) + (count3 === 0 ? pool3 : 0);
+  const distributed5 = count5 * prize5;
+  const distributed4 = count4 * prize4;
+  const distributed3 = count3 * prize3;
+  const totalDistributed = distributed5 + distributed4 + distributed3;
+
+  // Mathematically conserved: any unawarded pools + integer division residuals roll over
+  const rolloverAmount = Math.max(totalPrizePool - totalDistributed, 0);
 
   return {
     tier5Match: { count: count5, poolShare: pool5, individualPrize: prize5 },
@@ -126,8 +132,9 @@ export function calculatePrizePoolDistribution(
 /**
  * Simulates a monthly draw:
  * 1. Collects active subscribers who have logged exactly 5 scores (strictly eligible).
- * 2. Generates verified winning numbers.
- * 3. Evaluates entries and allocates tier prizes.
+ * 2. Carries forward any unawarded rollover from the previous published/locked draw.
+ * 3. Generates verified winning numbers.
+ * 4. Evaluates entries and allocates tier prizes.
  */
 export async function simulateMonthlyDraw(
   drawMonth: string,
@@ -145,8 +152,22 @@ export async function simulateMonthlyDraw(
 
   const activeUsers = subscribers || [];
 
-  // Estimated prize pool: ₹200 per active subscriber allocated to the draw prize pool (min ₹10,000)
-  const basePrizePool = Math.max(activeUsers.length * 200, 10000);
+  // Query previous published or locked draw to carry forward rollover jackpot
+  let previousRollover = 0;
+  const { data: previousDraws } = await supabase
+    .from('draws')
+    .select('rollover_amount')
+    .lt('draw_month', drawMonth)
+    .in('status', ['published', 'locked'])
+    .order('draw_month', { ascending: false })
+    .limit(1);
+
+  if (previousDraws && previousDraws.length > 0) {
+    previousRollover = Number(previousDraws[0].rollover_amount) || 0;
+  }
+
+  // Estimated prize pool: ₹200 per active subscriber + prior unawarded rollover (min ₹10,000)
+  const basePrizePool = Math.max(activeUsers.length * 200, 10000) + previousRollover;
 
   // Check if draw for this month already exists
   const { data: existingDraw } = await supabase
@@ -346,12 +367,13 @@ export async function publishDraw(drawId: string, actorId?: string): Promise<{ s
     if (insertError) throw new Error(`Failed to record winners: ${insertError.message}`);
   }
 
-  // Update draw status to published
+  // Update draw status to published and persist rollover amount
   await supabase
     .from('draws')
     .update({
       status: 'published',
       published_at: new Date().toISOString(),
+      rollover_amount: prizeBreakdown.rolloverAmount,
     })
     .eq('id', drawId);
 

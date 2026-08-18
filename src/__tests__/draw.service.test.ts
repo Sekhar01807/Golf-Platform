@@ -124,5 +124,31 @@ describe('Draw Engine: Mathematical Prize Pool Distribution', () => {
     expect(breakdown.tier5Match.count).toBe(0);
     expect(breakdown.tier5Match.individualPrize).toBe(0);
     expect(breakdown.rolloverAmount).toBe(40000);
+    expect(breakdown.totalDistributed + breakdown.rolloverAmount).toBe(totalPool);
+  });
+
+  it('should explicitly conserve integer division residuals into the rollover amount', () => {
+    // 3 winners in 5-match tier: 40000 / 3 = 13333 each -> 39999 distributed, 1 residual
+    // 3 winners in 4-match tier: 35000 / 3 = 11666 each -> 34998 distributed, 2 residual
+    // 3 winners in 3-match tier: 25000 / 3 = 8333 each -> 24999 distributed, 1 residual
+    const totalPool = 100000;
+    const tierCounts = {
+      '5-match': 3,
+      '4-match': 3,
+      '3-match': 3,
+    };
+
+    const breakdown = calculatePrizePoolDistribution(totalPool, tierCounts);
+
+    expect(breakdown.tier5Match.individualPrize).toBe(13333);
+    expect(breakdown.tier4Match.individualPrize).toBe(11666);
+    expect(breakdown.tier3Match.individualPrize).toBe(8333);
+
+    const totalDistributed = (3 * 13333) + (3 * 11666) + (3 * 8333); // 39999 + 34998 + 24999 = 99996
+    expect(breakdown.totalDistributed).toBe(totalDistributed);
+    expect(breakdown.rolloverAmount).toBe(4); // Residuals conserved: 100000 - 99996 = 4
+
+    // Conservation invariant: Total Distributed + Rollover ALWAYS equals Total Prize Pool
+    expect(breakdown.totalDistributed + breakdown.rolloverAmount).toBe(totalPool);
   });
 });
