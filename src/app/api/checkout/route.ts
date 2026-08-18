@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getStripe } from '@/lib/stripe';
 import { createClient } from '@/lib/supabase/server';
 import { validateCheckoutInput } from '@/lib/validations';
+import { getAppUrl, getStripePriceId } from '@/lib/env';
 
 export async function POST(request: NextRequest) {
   try {
@@ -25,12 +26,19 @@ export async function POST(request: NextRequest) {
     const { plan } = validation.data;
     const stripe = getStripe();
 
-    // Get or create Stripe customer
+    // Get user profile and verify subscription status
     const { data: profile } = await supabase
       .from('users')
-      .select('stripe_customer_id, email, full_name')
+      .select('stripe_customer_id, email, full_name, subscription_status')
       .eq('id', user.id)
       .single();
+
+    if (profile?.subscription_status === 'active') {
+      return NextResponse.json(
+        { error: 'User already has an active subscription. Manage billing via the customer portal.' },
+        { status: 400 }
+      );
+    }
 
     let customerId = profile?.stripe_customer_id;
 
@@ -47,17 +55,14 @@ export async function POST(request: NextRequest) {
       }).eq('id', user.id);
     }
 
-    const prices: Record<'monthly' | 'yearly', string> = {
-      monthly: process.env.STRIPE_MONTHLY_PRICE_ID || 'price_monthly',
-      yearly: process.env.STRIPE_YEARLY_PRICE_ID || 'price_yearly',
-    };
-
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+    // Fail closed if Stripe price ID is unconfigured or placeholder
+    const priceId = getStripePriceId(plan);
+    const appUrl = getAppUrl();
 
     const session = await stripe.checkout.sessions.create({
       customer: customerId,
       mode: 'subscription',
-      line_items: [{ price: prices[plan], quantity: 1 }],
+      line_items: [{ price: priceId, quantity: 1 }],
       success_url: `${appUrl}/dashboard?subscription=success`,
       cancel_url: `${appUrl}/dashboard/subscription?cancelled=true`,
       metadata: {
@@ -67,8 +72,8 @@ export async function POST(request: NextRequest) {
     });
 
     return NextResponse.json({ url: session.url });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Checkout error:', error);
-    return NextResponse.json({ error: 'Failed to create checkout session' }, { status: 500 });
+    return NextResponse.json({ error: error?.message || 'Failed to create checkout session' }, { status: 500 });
   }
 }

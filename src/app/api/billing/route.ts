@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getStripe } from '@/lib/stripe';
 import { createClient } from '@/lib/supabase/server';
+import { getAppUrl } from '@/lib/env';
 
 export async function POST(request: NextRequest) {
   try {
@@ -23,9 +24,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'No active billing profile found. Please subscribe first.' }, { status: 404 });
     }
 
+    const appUrl = getAppUrl();
+
     const session = await stripe.billingPortal.sessions.create({
       customer: profile.stripe_customer_id,
-      return_url: `${process.env.NEXT_PUBLIC_APP_URL}/dashboard/subscription`,
+      return_url: `${appUrl}/dashboard/subscription`,
     });
 
     return NextResponse.json({ url: session.url });

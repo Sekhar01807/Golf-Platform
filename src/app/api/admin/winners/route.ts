@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { assertAdminAPI } from '@/lib/auth/admin';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { validateWinnerUpdateInput } from '@/lib/validations';
+import { validateWinnerUpdateInput, isValidUuid } from '@/lib/validations';
 import { logAdminAction } from '@/lib/services/audit.service';
 
 export async function GET() {
@@ -32,8 +32,8 @@ export async function PATCH(request: NextRequest) {
   const body = await request.json().catch(() => null);
   const { id, ...updates } = body || {};
 
-  if (!id) {
-    return NextResponse.json({ error: 'Winner ID is required' }, { status: 400 });
+  if (!id || !isValidUuid(id)) {
+    return NextResponse.json({ error: 'A valid winner UUID is required' }, { status: 400 });
   }
 
   const validation = validateWinnerUpdateInput(updates);
@@ -42,6 +42,28 @@ export async function PATCH(request: NextRequest) {
   }
 
   const supabase = createAdminClient();
+
+  // Server-side boundary check: fetch existing record to ensure approved verification before paying out
+  const { data: existingWinner, error: fetchErr } = await supabase
+    .from('draw_winners')
+    .select('id, verification_status, payout_status')
+    .eq('id', id)
+    .single();
+
+  if (fetchErr || !existingWinner) {
+    return NextResponse.json({ error: 'Winner record not found' }, { status: 404 });
+  }
+
+  const targetVerification = validation.data.verification_status || existingWinner.verification_status;
+  const targetPayout = validation.data.payout_status || existingWinner.payout_status;
+
+  if (targetPayout === 'paid' && targetVerification !== 'approved') {
+    return NextResponse.json(
+      { error: 'Cannot mark payout as paid unless verification status is approved.' },
+      { status: 400 }
+    );
+  }
+
   const { data: updated, error } = await supabase
     .from('draw_winners')
     .update(validation.data)

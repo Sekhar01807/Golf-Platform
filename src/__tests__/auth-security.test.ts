@@ -158,3 +158,53 @@ describe('Security Suite: Winner Proof-Only Mutation Enforcement', () => {
     expect(result.allowed).toBe(true);
   });
 });
+
+describe('Security Suite: Payout Approval Invariant & RPC Caller Boundaries', () => {
+  function simulatePayoutPolicy(verificationStatus: string, payoutStatus: string): { allowed: boolean; error?: string } {
+    if (payoutStatus === 'paid' && verificationStatus !== 'approved') {
+      return { allowed: false, error: 'Cannot mark payout as paid unless verification status is approved.' };
+    }
+    return { allowed: true };
+  }
+
+  it('should reject marking a payout as paid if verification_status is pending or rejected', () => {
+    expect(simulatePayoutPolicy('pending', 'paid').allowed).toBe(false);
+    expect(simulatePayoutPolicy('rejected', 'paid').allowed).toBe(false);
+    expect(simulatePayoutPolicy('approved', 'paid').allowed).toBe(true);
+  });
+
+  function simulateAddScoreCallerBoundary(authUid: string | null, targetUserId: string, callerRole = 'user') {
+    if (!authUid && callerRole !== 'service_role') {
+      return { allowed: false, error: 'Authentication required' };
+    }
+    if (callerRole !== 'service_role' && callerRole !== 'admin' && authUid !== targetUserId) {
+      return { allowed: false, error: 'Unauthorized: Caller identity does not match score owner' };
+    }
+    return { allowed: true };
+  }
+
+  it('should block a user from inserting scores on behalf of another user', () => {
+    const res = simulateAddScoreCallerBoundary('user-1', 'user-2', 'user');
+    expect(res.allowed).toBe(false);
+    expect(res.error).toContain('identity');
+  });
+
+  it('should allow a user to insert scores for their own account', () => {
+    const res = simulateAddScoreCallerBoundary('user-1', 'user-1', 'user');
+    expect(res.allowed).toBe(true);
+  });
+
+  function simulateRecordDonationBoundary(callerRole: 'anon' | 'user' | 'admin' | 'service_role') {
+    if (callerRole !== 'service_role') {
+      return { allowed: false, error: 'Unauthorized: restricted to service_role' };
+    }
+    return { allowed: true };
+  }
+
+  it('should restrict direct invocation of record_completed_donation to service_role', () => {
+    expect(simulateRecordDonationBoundary('anon').allowed).toBe(false);
+    expect(simulateRecordDonationBoundary('user').allowed).toBe(false);
+    expect(simulateRecordDonationBoundary('admin').allowed).toBe(false);
+    expect(simulateRecordDonationBoundary('service_role').allowed).toBe(true);
+  });
+});

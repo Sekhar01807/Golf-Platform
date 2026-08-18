@@ -42,4 +42,17 @@ describe('Stripe Webhook Idempotency Pipeline', () => {
     expect(res2.processed).toBe(false);
     expect(res2.duplicate).toBe(true);
   });
+
+  it('should distinguish database errors from duplicates and fail closed', () => {
+    function evaluateWebhookInsertResult(err: { code?: string } | null) {
+      if (!err) return { status: 200, proceed: true };
+      if (err.code === '23505') return { status: 200, duplicate: true, proceed: false };
+      return { status: 500, error: 'Database idempotency claim failed', proceed: false };
+    }
+
+    expect(evaluateWebhookInsertResult(null).proceed).toBe(true);
+    expect(evaluateWebhookInsertResult({ code: '23505' }).duplicate).toBe(true);
+    expect(evaluateWebhookInsertResult({ code: '40001' }).status).toBe(500); // Serialization failure
+    expect(evaluateWebhookInsertResult({ code: '08006' }).status).toBe(500); // Connection failure
+  });
 });

@@ -1,6 +1,7 @@
 import { createAdminClient } from '@/lib/supabase/admin';
 import { logAdminAction } from './audit.service';
 import { MatchType } from '@/types/database';
+import { randomInt, createHash } from 'crypto';
 
 export interface EvaluatedWinner {
   userId: string;
@@ -29,26 +30,55 @@ export interface DrawSimulationResult {
 }
 
 /**
- * Generates 5 distinct winning numbers between 1 and 45 (Stableford scale)
+ * Generates 5 distinct winning numbers between 1 and 45 using Cryptographically Secure Pseudo-Random Number Generation (CSPRNG)
  */
 export function generateWinningNumbers(count = 5, min = 1, max = 45): number[] {
   const numbers = new Set<number>();
   while (numbers.size < count) {
-    const num = Math.floor(Math.random() * (max - min + 1)) + min;
+    const num = randomInt(min, max + 1);
     numbers.add(num);
   }
   return Array.from(numbers).sort((a, b) => a - b);
 }
 
 /**
- * Compares entry numbers with winning numbers and determines match tier
+ * Generates 5 distinct winning numbers deterministically derived from a verifiable SHA-256 hash digest
+ */
+export function generateAlgorithmicWinningNumbers(
+  drawMonth: string,
+  seedData = 'golf_charity_draw_seed',
+  count = 5,
+  min = 1,
+  max = 45
+): number[] {
+  const numbers = new Set<number>();
+  let counter = 0;
+  const range = max - min + 1;
+
+  while (numbers.size < count) {
+    const hash = createHash('sha256')
+      .update(`${drawMonth}:${seedData}:${counter}`)
+      .digest('hex');
+    const subInt = parseInt(hash.substring(0, 8), 16);
+    const num = (subInt % range) + min;
+    numbers.add(num);
+    counter++;
+  }
+
+  return Array.from(numbers).sort((a, b) => a - b);
+}
+
+/**
+ * Compares entry numbers with winning numbers and determines match tier.
+ * Enforces set deduplication so repeated identical numbers in an entry cannot inflate the match count.
  */
 export function evaluateEntry(
   entryNumbers: number[],
   winningNumbers: number[]
 ): { matchCount: number; matchType: MatchType | null } {
   const winSet = new Set(winningNumbers);
-  const matched = entryNumbers.filter(num => winSet.has(num));
+  const uniqueEntries = Array.from(new Set(entryNumbers));
+  const matched = uniqueEntries.filter(num => winSet.has(num));
   const matchCount = matched.length;
 
   if (matchCount >= 5) return { matchCount, matchType: '5-match' };
@@ -129,11 +159,11 @@ export async function simulateMonthlyDraw(
   let winningNumbers: number[];
 
   if (existingDraw) {
-    if (existingDraw.status === 'locked') {
-      throw new Error('This draw is locked and immutable.');
+    if (existingDraw.status === 'published' || existingDraw.status === 'locked') {
+      throw new Error(`Cannot simulate a draw that is already ${existingDraw.status}.`);
     }
-    winningNumbers = existingDraw.winning_numbers?.length === 5
-      ? existingDraw.winning_numbers
+    winningNumbers = drawLogic === 'algorithmic'
+      ? generateAlgorithmicWinningNumbers(drawMonth)
       : generateWinningNumbers();
 
     await supabase
@@ -145,7 +175,10 @@ export async function simulateMonthlyDraw(
       })
       .eq('id', drawId);
   } else {
-    winningNumbers = generateWinningNumbers();
+    winningNumbers = drawLogic === 'algorithmic'
+      ? generateAlgorithmicWinningNumbers(drawMonth)
+      : generateWinningNumbers();
+
     const { data: newDraw, error: createError } = await supabase
       .from('draws')
       .insert({
@@ -248,7 +281,9 @@ export async function publishDraw(drawId: string, actorId?: string): Promise<{ s
     .single();
 
   if (drawError || !draw) throw new Error('Draw not found');
-  if (draw.status === 'locked') throw new Error('Cannot publish a locked draw');
+  if (draw.status !== 'simulated') {
+    throw new Error(`Cannot publish a draw with status "${draw.status}". Only simulated draws can be published.`);
+  }
 
   const winningNumbers: number[] = draw.winning_numbers || [];
   if (winningNumbers.length !== 5) {
@@ -349,7 +384,7 @@ export async function lockDraw(drawId: string, actorId?: string): Promise<{ succ
 
   if (error || !draw) throw new Error('Draw not found');
   if (draw.status !== 'published') {
-    throw new Error('Only published draws can be locked');
+    throw new Error(`Cannot lock a draw with status "${draw.status}". Only published draws can be locked.`);
   }
 
   await supabase

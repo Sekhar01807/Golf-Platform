@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { assertAdminAPI } from '@/lib/auth/admin';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { simulateMonthlyDraw, publishDraw, lockDraw } from '@/lib/services/draw.service';
+import { validateDrawActionInput } from '@/lib/validations';
 
 export async function GET() {
   const auth = await assertAdminAPI();
@@ -29,28 +30,31 @@ export async function POST(request: NextRequest) {
   }
 
   const body = await request.json().catch(() => null);
-  const { action, drawMonth, drawLogic, drawId } = body || {};
+  const validation = validateDrawActionInput(body);
+
+  if (!validation.success || !validation.data) {
+    return NextResponse.json({ error: validation.error }, { status: 400 });
+  }
+
+  const { action, drawMonth, drawLogic, drawId } = validation.data;
 
   try {
-    if (action === 'simulate') {
-      const month = drawMonth || new Date().toISOString().slice(0, 7) + '-01';
-      const result = await simulateMonthlyDraw(month, drawLogic || 'random');
+    if (action === 'simulate' && drawMonth) {
+      const result = await simulateMonthlyDraw(drawMonth, drawLogic || 'random');
       return NextResponse.json(result);
     }
 
-    if (action === 'publish') {
-      if (!drawId) return NextResponse.json({ error: 'drawId is required to publish' }, { status: 400 });
+    if (action === 'publish' && drawId) {
       const result = await publishDraw(drawId, auth.user.id);
       return NextResponse.json(result);
     }
 
-    if (action === 'lock') {
-      if (!drawId) return NextResponse.json({ error: 'drawId is required to lock' }, { status: 400 });
+    if (action === 'lock' && drawId) {
       const result = await lockDraw(drawId, auth.user.id);
       return NextResponse.json(result);
     }
 
-    return NextResponse.json({ error: 'Invalid action. Supported: simulate, publish, lock' }, { status: 400 });
+    return NextResponse.json({ error: 'Invalid draw action payload' }, { status: 400 });
   } catch (err: any) {
     console.error('Draw operation error:', err);
     return NextResponse.json({ error: err?.message || 'Failed to execute draw operation' }, { status: 500 });

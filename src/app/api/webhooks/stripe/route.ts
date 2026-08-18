@@ -46,10 +46,13 @@ export async function POST(request: NextRequest) {
       ) {
         return NextResponse.json({ received: true, duplicate: true });
       }
-      console.warn('Stripe idempotency insert warning:', insertError);
+      // Non-duplicate database failure -> FAIL CLOSED (do not process, signal Stripe to retry)
+      console.error('Stripe idempotency database claim failed (failing closed):', insertError);
+      return NextResponse.json({ error: 'Database idempotency claim failed' }, { status: 500 });
     }
   } catch (dbErr) {
-    console.warn('Stripe idempotency check warning:', dbErr);
+    console.error('Stripe idempotency check exception (failing closed):', dbErr);
+    return NextResponse.json({ error: 'Database idempotency check error' }, { status: 500 });
   }
 
   // ── 2. Handle Stripe Event Types ──
@@ -67,7 +70,7 @@ export async function POST(request: NextRequest) {
           const paymentId = typeof session.payment_intent === 'string' ? session.payment_intent : session.id;
 
           if (charityId && donationAmount > 0) {
-            // Attempt atomic DB RPC
+            // Strictly require atomic DB RPC
             const { error: rpcErr } = await supabase.rpc('record_completed_donation', {
               p_user_id: userId,
               p_charity_id: charityId,
@@ -76,26 +79,8 @@ export async function POST(request: NextRequest) {
             });
 
             if (rpcErr) {
-              // Fallback manual insert & increment
-              await supabase.from('independent_donations').insert({
-                user_id: userId,
-                charity_id: charityId,
-                amount: donationAmount,
-                payment_status: 'completed',
-                stripe_payment_id: paymentId,
-              });
-
-              const { data: charity } = await supabase
-                .from('charities')
-                .select('total_contributions')
-                .eq('id', charityId)
-                .single();
-
-              const updatedTotal = (Number(charity?.total_contributions) || 0) + donationAmount;
-              await supabase
-                .from('charities')
-                .update({ total_contributions: updatedTotal })
-                .eq('id', charityId);
+              console.error('Failed to record completed donation via atomic RPC:', rpcErr);
+              throw new Error(`Atomic donation recording failed: ${rpcErr.message}`);
             }
           }
           break;

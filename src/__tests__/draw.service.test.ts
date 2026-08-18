@@ -1,12 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import {
   generateWinningNumbers,
+  generateAlgorithmicWinningNumbers,
   evaluateEntry,
   calculatePrizePoolDistribution,
 } from '../lib/services/draw.service';
 
-describe('Draw Engine: Winning Number Generator', () => {
-  it('should generate exactly 5 numbers within 1–45', () => {
+describe('Draw Engine: Winning Number Generator (CSPRNG & Algorithmic)', () => {
+  it('should generate exactly 5 numbers within 1–45 using CSPRNG', () => {
     const winningNumbers = generateWinningNumbers();
     expect(winningNumbers).toHaveLength(5);
     winningNumbers.forEach((n) => {
@@ -26,16 +27,41 @@ describe('Draw Engine: Winning Number Generator', () => {
       expect(numbers).toEqual(sorted);
     }
   });
+
+  it('should deterministically generate repeatable, distinct winning numbers when using algorithmic mode', () => {
+    const month = '2026-08-01';
+    const draw1 = generateAlgorithmicWinningNumbers(month, 'seed_key');
+    const draw2 = generateAlgorithmicWinningNumbers(month, 'seed_key');
+    const drawOtherMonth = generateAlgorithmicWinningNumbers('2026-09-01', 'seed_key');
+
+    expect(draw1).toEqual(draw2);
+    expect(new Set(draw1).size).toBe(5);
+    expect(draw1).not.toEqual(drawOtherMonth);
+  });
 });
 
 describe('Draw Engine: Entry Match Tier Evaluator', () => {
   const winningNumbers = [7, 14, 21, 28, 35];
 
-  it('should detect a 5-match jackpot tier', () => {
+  it('should detect a 5-match jackpot tier for distinct matching numbers', () => {
     const entry = [7, 14, 21, 28, 35];
     const res = evaluateEntry(entry, winningNumbers);
     expect(res.matchCount).toBe(5);
     expect(res.matchType).toBe('5-match');
+  });
+
+  it('should prevent duplicate entry scores from multiplying match count (anti-inflation)', () => {
+    // A player logged identical score 7 five times
+    const duplicateEntryAllSame = [7, 7, 7, 7, 7];
+    const resAllSame = evaluateEntry(duplicateEntryAllSame, winningNumbers);
+    expect(resAllSame.matchCount).toBe(1);
+    expect(resAllSame.matchType).toBeNull();
+
+    // A player logged [7, 7, 14, 21, 40]: matches 7, 14, 21 (3 matches), not 4 matches
+    const duplicateEntry = [7, 7, 14, 21, 40];
+    const resDuplicate = evaluateEntry(duplicateEntry, winningNumbers);
+    expect(resDuplicate.matchCount).toBe(3);
+    expect(resDuplicate.matchType).toBe('3-match');
   });
 
   it('should detect a 4-match tier', () => {

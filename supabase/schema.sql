@@ -48,7 +48,7 @@ BEGIN
   );
   RETURN NEW;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
 
 CREATE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
@@ -139,7 +139,8 @@ CREATE TABLE public.draw_winners (
   verification_status verification_status NOT NULL DEFAULT 'pending',
   payout_status payout_status NOT NULL DEFAULT 'pending',
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  UNIQUE(draw_id, user_id)
+  UNIQUE(draw_id, user_id),
+  CONSTRAINT chk_draw_winners_payout_verified CHECK (payout_status != 'paid' OR verification_status = 'approved')
 );
 
 -- ═══════════════════════════════════════════════════
@@ -148,7 +149,7 @@ CREATE TABLE public.draw_winners (
 CREATE TABLE public.independent_donations (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   user_id UUID REFERENCES public.users(id) ON DELETE SET NULL,
-  charity_id UUID NOT NULL REFERENCES public.charities(id) ON DELETE CASCADE,
+  charity_id UUID NOT NULL REFERENCES public.charities(id) ON DELETE RESTRICT,
   amount NUMERIC NOT NULL CHECK (amount > 0),
   payment_status payment_status NOT NULL DEFAULT 'pending',
   stripe_payment_id TEXT,
@@ -226,7 +227,7 @@ BEGIN
 
   RETURN NEW;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
 
 CREATE TRIGGER protect_user_fields_trigger
   BEFORE UPDATE ON public.users
@@ -238,12 +239,19 @@ RETURNS TRIGGER AS $$
 DECLARE
   caller_role user_role;
 BEGIN
+  -- Service role bypass
   IF current_user = 'service_role' OR current_setting('request.jwt.claim.role', true) = 'service_role' THEN
+    IF NEW.payout_status = 'paid' AND NEW.verification_status != 'approved' THEN
+      RAISE EXCEPTION 'Cannot mark payout as paid unless verification status is approved.';
+    END IF;
     RETURN NEW;
   END IF;
 
   SELECT role INTO caller_role FROM public.users WHERE id = auth.uid();
   IF caller_role = 'admin' THEN
+    IF NEW.payout_status = 'paid' AND NEW.verification_status != 'approved' THEN
+      RAISE EXCEPTION 'Cannot mark payout as paid unless verification status is approved.';
+    END IF;
     RETURN NEW;
   END IF;
 
@@ -263,13 +271,13 @@ BEGIN
 
   RETURN NEW;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
 
 CREATE TRIGGER protect_draw_winner_fields_trigger
   BEFORE UPDATE ON public.draw_winners
   FOR EACH ROW EXECUTE FUNCTION public.protect_draw_winner_fields();
 
--- C. Enforce 5-Score Maximum Transactionally via FIFO RPC
+-- C. Enforce 5-Score Maximum Transactionally via FIFO RPC with Caller-Identity Boundary
 CREATE OR REPLACE FUNCTION public.add_golf_score(
   p_user_id UUID,
   p_score INT,
@@ -279,7 +287,22 @@ RETURNS UUID AS $$
 DECLARE
   v_score_id UUID;
   v_count INT;
+  v_caller_role user_role;
 BEGIN
+  -- Caller identity boundary: caller must be authenticated and match target user or have admin/service privileges
+  IF current_user != 'service_role' AND current_setting('request.jwt.claim.role', true) != 'service_role' THEN
+    IF auth.uid() IS NULL THEN
+      RAISE EXCEPTION 'Authentication required.';
+    END IF;
+
+    IF auth.uid() != p_user_id THEN
+      SELECT role INTO v_caller_role FROM public.users WHERE id = auth.uid();
+      IF v_caller_role IS DISTINCT FROM 'admin' THEN
+        RAISE EXCEPTION 'Unauthorized: Caller identity does not match score owner.';
+      END IF;
+    END IF;
+  END IF;
+
   IF p_score < 1 OR p_score > 45 THEN
     RAISE EXCEPTION 'Score must be between 1 and 45 (Stableford format)';
   END IF;
@@ -308,9 +331,9 @@ BEGIN
 
   RETURN v_score_id;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
 
--- D. Atomic Donation Ledger Update
+-- D. Atomic Donation Ledger Update (Service-Role Boundary Restricted)
 CREATE OR REPLACE FUNCTION public.record_completed_donation(
   p_user_id UUID,
   p_charity_id UUID,
@@ -321,6 +344,15 @@ RETURNS UUID AS $$
 DECLARE
   v_donation_id UUID;
 BEGIN
+  -- Verify caller identity: strictly restricted to service_role / webhook background execution
+  IF current_user != 'service_role' AND current_setting('request.jwt.claim.role', true) != 'service_role' THEN
+    RAISE EXCEPTION 'Unauthorized: record_completed_donation is restricted to service_role execution.';
+  END IF;
+
+  IF p_amount <= 0 THEN
+    RAISE EXCEPTION 'Donation amount must be greater than 0';
+  END IF;
+
   INSERT INTO public.independent_donations (user_id, charity_id, amount, payment_status, stripe_payment_id)
   VALUES (p_user_id, p_charity_id, p_amount, 'completed', p_stripe_payment_id)
   RETURNING id INTO v_donation_id;
@@ -332,7 +364,11 @@ BEGIN
 
   RETURN v_donation_id;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
+
+-- Explicitly revoke execution on financial RPC from public/anon/authenticated clients
+REVOKE EXECUTE ON FUNCTION public.record_completed_donation(UUID, UUID, NUMERIC, TEXT) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.record_completed_donation(UUID, UUID, NUMERIC, TEXT) TO service_role;
 
 -- ═══════════════════════════════════════════════════
 -- 11. ROW LEVEL SECURITY (RLS) POLICIES

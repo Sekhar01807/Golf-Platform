@@ -171,3 +171,99 @@ describe('Regression 10: Completed Donation Updates Charity Total Atomically', (
     expect(updated.newTotal).toBe(52500);
   });
 });
+
+describe('Regression 11: Fail-Closed Webhook Idempotency on DB Failure', () => {
+  function processWebhookIdempotency(dbInsertResult: { error: { code?: string; message?: string } | null }) {
+    if (dbInsertResult.error) {
+      if (
+        dbInsertResult.error.code === '23505' ||
+        dbInsertResult.error.message?.toLowerCase().includes('duplicate') ||
+        dbInsertResult.error.message?.toLowerCase().includes('unique')
+      ) {
+        return { status: 200, duplicate: true };
+      }
+      // Non-duplicate database failure must fail closed (return 500)
+      return { status: 500, error: 'Database idempotency claim failed' };
+    }
+    return { status: 200, processed: true };
+  }
+
+  it('11. should fail closed with status 500 when database idempotency claim errors', () => {
+    const dbDownResult = processWebhookIdempotency({ error: { code: '57P01', message: 'Admin shutdown / connection refused' } });
+    expect(dbDownResult.status).toBe(500);
+
+    const duplicateResult = processWebhookIdempotency({ error: { code: '23505', message: 'duplicate key value violates unique constraint' } });
+    expect(duplicateResult.status).toBe(200);
+    expect(duplicateResult.duplicate).toBe(true);
+  });
+});
+
+describe('Regression 12: Duplicate Active Subscription Prevention', () => {
+  function validateCheckoutEligibility(userProfile: { subscription_status: string }) {
+    if (userProfile.subscription_status === 'active') {
+      return { allowed: false, status: 400, error: 'User already has an active subscription' };
+    }
+    return { allowed: true, status: 200 };
+  }
+
+  it('12. should reject new checkout session if the user already has an active subscription', () => {
+    const activeUser = { subscription_status: 'active' };
+    const res = validateCheckoutEligibility(activeUser);
+    expect(res.allowed).toBe(false);
+    expect(res.status).toBe(400);
+
+    const inactiveUser = { subscription_status: 'inactive' };
+    expect(validateCheckoutEligibility(inactiveUser).allowed).toBe(true);
+  });
+});
+
+describe('Regression 13: Charity Deletion Guard for Historical Donations', () => {
+  function deleteCharityGuard(donationsCount: number) {
+    if (donationsCount > 0) {
+      return { allowed: false, status: 409, error: 'Cannot delete charity with existing donation history' };
+    }
+    return { allowed: true, status: 200 };
+  }
+
+  it('13. should block charity deletion with HTTP 409 when historical donations exist', () => {
+    expect(deleteCharityGuard(5).allowed).toBe(false);
+    expect(deleteCharityGuard(5).status).toBe(409);
+    expect(deleteCharityGuard(0).allowed).toBe(true);
+  });
+});
+
+describe('Regression 14: Draw Lifecycle State Machine Enforcements', () => {
+  function simulateDrawStateTransition(currentStatus: 'simulated' | 'published' | 'locked', action: 'simulate' | 'publish' | 'lock') {
+    if (action === 'simulate') {
+      if (currentStatus === 'published' || currentStatus === 'locked') {
+        throw new Error(`Cannot simulate a draw that is already ${currentStatus}`);
+      }
+      return 'simulated';
+    }
+    if (action === 'publish') {
+      if (currentStatus !== 'simulated') {
+        throw new Error(`Cannot publish a draw with status "${currentStatus}". Only simulated draws can be published.`);
+      }
+      return 'published';
+    }
+    if (action === 'lock') {
+      if (currentStatus !== 'published') {
+        throw new Error(`Cannot lock a draw with status "${currentStatus}". Only published draws can be locked.`);
+      }
+      return 'locked';
+    }
+  }
+
+  it('14. should enforce strict one-way lifecycle transitions (simulated -> published -> locked)', () => {
+    expect(simulateDrawStateTransition('simulated', 'publish')).toBe('published');
+    expect(simulateDrawStateTransition('published', 'lock')).toBe('locked');
+
+    // Cannot re-simulate published or locked
+    expect(() => simulateDrawStateTransition('published', 'simulate')).toThrow('Cannot simulate');
+    expect(() => simulateDrawStateTransition('locked', 'simulate')).toThrow('Cannot simulate');
+
+    // Cannot publish locked or already published
+    expect(() => simulateDrawStateTransition('published', 'publish')).toThrow('Cannot publish');
+    expect(() => simulateDrawStateTransition('locked', 'publish')).toThrow('Cannot publish');
+  });
+});

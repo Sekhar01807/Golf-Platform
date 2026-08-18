@@ -158,6 +158,11 @@ export interface WinnerStatusUpdateInput {
   payout_status?: 'pending' | 'paid';
 }
 
+export function isValidUuid(id: unknown): boolean {
+  if (typeof id !== 'string') return false;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+}
+
 export function validateWinnerUpdateInput(input: unknown): ValidationResult<WinnerStatusUpdateInput> {
   if (!input || typeof input !== 'object') {
     return { success: false, error: 'Invalid payload: JSON object expected' };
@@ -184,4 +189,79 @@ export function validateWinnerUpdateInput(input: unknown): ValidationResult<Winn
       payout_status: payout_status as WinnerStatusUpdateInput['payout_status'],
     },
   };
+}
+
+// ── Admin Draw Action Validation ──
+export interface DrawActionInput {
+  action: 'simulate' | 'publish' | 'lock';
+  drawMonth?: string;
+  drawLogic?: 'random' | 'algorithmic';
+  drawId?: string;
+}
+
+export function validateDrawActionInput(input: unknown): ValidationResult<DrawActionInput> {
+  if (!input || typeof input !== 'object') {
+    return { success: false, error: 'Invalid payload: JSON object expected' };
+  }
+
+  const { action, drawMonth, drawLogic, drawId } = input as Record<string, unknown>;
+
+  if (!action || (action !== 'simulate' && action !== 'publish' && action !== 'lock')) {
+    return { success: false, error: 'Invalid action: Must be "simulate", "publish", or "lock"' };
+  }
+
+  if (action === 'simulate') {
+    let monthStr = drawMonth;
+    if (!monthStr) {
+      monthStr = new Date().toISOString().slice(0, 7) + '-01';
+    }
+
+    if (typeof monthStr !== 'string') {
+      return { success: false, error: 'drawMonth must be a string formatted as YYYY-MM-DD or YYYY-MM' };
+    }
+
+    // Support YYYY-MM or YYYY-MM-01 format
+    if (/^\d{4}-\d{2}$/.test(monthStr)) {
+      monthStr = `${monthStr}-01`;
+    }
+
+    if (!/^\d{4}-\d{2}-01$/.test(monthStr)) {
+      return { success: false, error: 'drawMonth must be in YYYY-MM-01 format' };
+    }
+
+    const parsed = new Date(monthStr);
+    if (Number.isNaN(parsed.getTime())) {
+      return { success: false, error: 'Invalid drawMonth date provided' };
+    }
+
+    const logic = drawLogic || 'random';
+    if (logic !== 'random' && logic !== 'algorithmic') {
+      return { success: false, error: 'drawLogic must be either "random" or "algorithmic"' };
+    }
+
+    return {
+      success: true,
+      data: {
+        action: 'simulate',
+        drawMonth: monthStr,
+        drawLogic: logic,
+      },
+    };
+  }
+
+  if (action === 'publish' || action === 'lock') {
+    if (!drawId || typeof drawId !== 'string' || !isValidUuid(drawId)) {
+      return { success: false, error: `A valid drawId UUID is required to ${action} a draw` };
+    }
+
+    return {
+      success: true,
+      data: {
+        action,
+        drawId,
+      },
+    };
+  }
+
+  return { success: false, error: 'Unsupported draw action' };
 }

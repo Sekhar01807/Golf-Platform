@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { assertAdminAPI } from '@/lib/auth/admin';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { validateCharityInput } from '@/lib/validations';
+import { validateCharityInput, isValidUuid } from '@/lib/validations';
 import { logAdminAction } from '@/lib/services/audit.service';
 
 export async function GET() {
@@ -67,11 +67,29 @@ export async function DELETE(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const id = searchParams.get('id');
 
-  if (!id) {
-    return NextResponse.json({ error: 'Charity ID is required' }, { status: 400 });
+  if (!id || !isValidUuid(id)) {
+    return NextResponse.json({ error: 'A valid charity UUID is required' }, { status: 400 });
   }
 
   const supabase = createAdminClient();
+
+  // Protect historical donation records: verify no donations are attached
+  const { count: donationCount, error: countError } = await supabase
+    .from('independent_donations')
+    .select('id', { count: 'exact', head: true })
+    .eq('charity_id', id);
+
+  if (countError) {
+    return NextResponse.json({ error: 'Failed to verify donation history' }, { status: 500 });
+  }
+
+  if (donationCount && donationCount > 0) {
+    return NextResponse.json(
+      { error: 'Cannot delete charity with existing donation history. Financial records are immutable.' },
+      { status: 409 }
+    );
+  }
+
   const { error } = await supabase.from('charities').delete().eq('id', id);
 
   if (error) {
@@ -97,8 +115,8 @@ export async function PATCH(request: NextRequest) {
   const body = await request.json().catch(() => null);
   const { id, is_featured } = body || {};
 
-  if (!id || typeof is_featured !== 'boolean') {
-    return NextResponse.json({ error: 'Charity ID and is_featured boolean required' }, { status: 400 });
+  if (!id || !isValidUuid(id) || typeof is_featured !== 'boolean') {
+    return NextResponse.json({ error: 'A valid charity UUID and is_featured boolean are required' }, { status: 400 });
   }
 
   const supabase = createAdminClient();

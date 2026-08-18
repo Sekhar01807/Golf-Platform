@@ -103,3 +103,62 @@ describe('Validation Suite: Winner Status Updates', () => {
     expect(validateWinnerUpdateInput({ verification_status: 'hacked' }).success).toBe(false);
   });
 });
+
+describe('Validation Suite: UUID Validation Helper', () => {
+  it('should validate RFC4122 standard UUIDs', () => {
+    expect(isValidUuid('12345678-1234-4234-8234-123456789abc')).toBe(true);
+    expect(isValidUuid('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11')).toBe(true);
+  });
+
+  it('should reject invalid UUID strings and non-strings', () => {
+    expect(isValidUuid('invalid-uuid')).toBe(false);
+    expect(isValidUuid('')).toBe(false);
+    expect(isValidUuid(null)).toBe(false);
+    expect(isValidUuid(12345)).toBe(false);
+  });
+});
+
+describe('Validation Suite: Admin Draw Actions', () => {
+  it('should validate valid simulation actions', () => {
+    const res = validateDrawActionInput({
+      action: 'simulate',
+      drawMonth: '2026-08-01',
+      drawLogic: 'algorithmic',
+    });
+    expect(res.success).toBe(true);
+    expect(res.data?.action).toBe('simulate');
+    expect(res.data?.drawLogic).toBe('algorithmic');
+  });
+
+  it('should normalize YYYY-MM to YYYY-MM-01 for simulation', () => {
+    const res = validateDrawActionInput({
+      action: 'simulate',
+      drawMonth: '2026-08',
+      drawLogic: 'random',
+    });
+    expect(res.success).toBe(true);
+    expect(res.data?.drawMonth).toBe('2026-08-01');
+  });
+
+  it('should reject invalid drawMonth formats or invalid drawLogic', () => {
+    expect(validateDrawActionInput({ action: 'simulate', drawMonth: '08-2026' }).success).toBe(false);
+    expect(validateDrawActionInput({ action: 'simulate', drawLogic: 'quantum' }).success).toBe(false);
+  });
+
+  it('should require a valid drawId UUID for publish and lock actions', () => {
+    const validUuid = '12345678-1234-1234-1234-123456789abc';
+    const publishRes = validateDrawActionInput({ action: 'publish', drawId: validUuid });
+    expect(publishRes.success).toBe(true);
+
+    const lockRes = validateDrawActionInput({ action: 'lock', drawId: validUuid });
+    expect(lockRes.success).toBe(true);
+
+    const invalidRes = validateDrawActionInput({ action: 'publish', drawId: 'not-a-uuid' });
+    expect(invalidRes.success).toBe(false);
+    expect(invalidRes.error).toContain('UUID');
+  });
+
+  it('should reject unsupported actions', () => {
+    expect(validateDrawActionInput({ action: 'delete' }).success).toBe(false);
+  });
+});
