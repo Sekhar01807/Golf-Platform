@@ -259,7 +259,7 @@ npm test
 ```
 
 ### Test Suites Included:
-- **`src/__tests__/security-regression.test.ts`**: Comprehensive 14-point regression suite covering role escalation, subscription mutation guards, payout protection, non-admin API rejection, locked draw immutability, future date rejection, strict 5-score FIFO, fail-closed webhook idempotency, duplicate subscription prevention, charity deletion cascade blocks, and draw lifecycle state transitions.
+- **`src/__tests__/security-regression.test.ts`**: Comprehensive 16-point regression suite covering role escalation, subscription mutation guards, payout protection, non-admin API rejection, locked draw immutability, future date rejection, strict 5-score FIFO, fail-closed webhook idempotency, duplicate subscription prevention, charity deletion cascade blocks, draw lifecycle state transitions, fail-closed audit logging, and score age horizons.
 - **`src/__tests__/validations.test.ts`**: Score constraints (1–45), date formats, future date rejection, checkout plan whitelisting, UUID validation, draw actions, and winner proof URL validations.
 - **`src/__tests__/draw.service.test.ts`**: CSPRNG generation, deterministic SHA-256 algorithmic draw, anti-inflation matching, mathematical prize pool split, rollover persistence, and residual arithmetic conservation.
 - **`src/__tests__/auth-security.test.ts`**: Privilege escalation blocking, winner proof-only mutation enforcement, RPC caller boundaries, and payout approval requirements.
