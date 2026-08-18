@@ -56,8 +56,18 @@ export async function POST(request: NextRequest) {
     }
 
     // Fail closed if Stripe price ID is unconfigured or placeholder
-    const priceId = getStripePriceId(plan);
+    let priceId = getStripePriceId(plan);
     const appUrl = getAppUrl();
+
+    // If a product ID (prod_...) was provided, resolve its active price automatically
+    if (priceId.startsWith('prod_')) {
+      const prices = await stripe.prices.list({ product: priceId, active: true, limit: 1 });
+      if (prices.data.length > 0) {
+        priceId = prices.data[0].id;
+      } else {
+        throw new Error(`No active price found for Stripe product ${priceId}. Please create a recurring price in Stripe.`);
+      }
+    }
 
     const session = await stripe.checkout.sessions.create({
       customer: customerId,
