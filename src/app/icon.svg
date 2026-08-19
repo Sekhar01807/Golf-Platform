@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <linearGradient id="iconBgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1B432C"/>
+      <stop offset="100%" stop-color="#132E1F"/>
+    </linearGradient>
+    <linearGradient id="iconTurfGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#74C69D"/>
+      <stop offset="100%" stop-color="#40916C"/>
+    </linearGradient>
+    <radialGradient id="iconBallGrad" cx="35%" cy="35%" r="65%">
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="85%" stop-color="#E2E8E4"/>
+      <stop offset="100%" stop-color="#C5D3C8"/>
+    </radialGradient>
+  </defs>
+
+  <!-- Forest Green Rounded Container -->
+  <rect width="64" height="64" rx="16" fill="url(#iconBgGrad)"/>
+  <rect width="64" height="64" rx="16" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
+
+  <!-- Putting Green Turf (Oval) -->
+  <ellipse cx="32" cy="40" rx="19" ry="9" fill="url(#iconTurfGrad)"/>
+
+  <!-- Golf Cup / Hole -->
+  <ellipse cx="26" cy="40" rx="3.5" ry="1.8" fill="#0E2316"/>
+
+  <!-- Flagpole -->
+  <line x1="26" y1="40" x2="26" y2="18" stroke="#F4D06F" stroke-width="2.2" stroke-linecap="round"/>
+
+  <!-- Pink Flag -->
+  <path d="M26 18 L41 23.5 L26 29 Z" fill="#FF4D6D"/>
+
+  <!-- Ball Shadow -->
+  <ellipse cx="38" cy="41.5" rx="2.5" ry="0.9" fill="rgba(19, 46, 31, 0.4)"/>
+
+  <!-- Golf Ball -->
+  <circle cx="38" cy="39" r="2.8" fill="url(#iconBallGrad)"/>
+</svg>

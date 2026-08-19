@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import Image from 'next/image';
+import Logo from '@/components/Logo/Logo';
 import styles from './page.module.css';
 import { createClient } from '@/lib/supabase/server';
 
@@ -93,7 +94,8 @@ export default async function HomePage() {
         <div className="container">
           <div className={styles.heroContent}>
             <div className={styles.heroTag}>
-              ⛳ Purpose-Driven Golf Platform
+              <Logo size={20} />
+              <span>Purpose-Driven Golf Platform</span>
             </div>
             <h1 className={styles.heroTitle}>
               Play Golf. <span>Make An Impact.</span>

@@ -5,6 +5,8 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import styles from './Navbar.module.css';
 
+import Logo from '@/components/Logo/Logo';
+
 export default function Navbar() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const pathname = usePathname();
@@ -19,7 +21,7 @@ export default function Navbar() {
     <header className={styles.navbar}>
       <div className={`container ${styles.navContainer}`}>
         <Link href="/" className={styles.logo}>
-          <div className={styles.logoMark}>⛳</div>
+          <Logo size={36} />
           <span className={styles.logoText}>
             Golf<span>ForGood</span>
           </span>

@@ -2,7 +2,9 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
+import Logo from '@/components/Logo/Logo';
 import styles from '../auth.module.css';
 
 export default function SignupPage() {
@@ -12,6 +14,7 @@ export default function SignupPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
+  const router = useRouter();
   const supabase = createClient();
 
   const handleSignup = async (e: React.FormEvent) => {
@@ -19,7 +22,7 @@ export default function SignupPage() {
     setLoading(true);
     setError('');
 
-    const { error } = await supabase.auth.signUp({
+    const { error: authError } = await supabase.auth.signUp({
       email,
       password,
       options: {
@@ -29,8 +32,8 @@ export default function SignupPage() {
       },
     });
 
-    if (error) {
-      setError(error.message);
+    if (authError) {
+      setError(authError.message);
       setLoading(false);
       return;
     }
@@ -63,7 +66,9 @@ export default function SignupPage() {
     <div className={styles.authPage}>
       <div className={styles.authCard}>
         <div className={styles.authHeader}>
-          <div className={styles.authBadge}>⛳</div>
+          <div style={{ display: 'inline-flex', marginBottom: '1rem' }}>
+            <Logo size={52} />
+          </div>
           <h1>Join GolfForGood</h1>
           <p>Create your membership and fund vital charities</p>
         </div>

@@ -11,6 +11,11 @@ export const metadata: Metadata = {
   description:
     'A premium golf platform combining Stableford score tracking, charitable giving, and monthly prize draws. Play your game, support verified causes, and win prizes.',
   keywords: ['golf', 'charity', 'subscription', 'prize draw', 'stableford', 'fundraising'],
+  icons: {
+    icon: '/logo.svg',
+    shortcut: '/logo.svg',
+    apple: '/logo.svg',
+  },
 };
 
 export default function RootLayout({

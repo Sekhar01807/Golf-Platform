@@ -51,7 +51,10 @@ export default function HowItWorksPage() {
       {/* Hero */}
       <section className={styles.hero}>
         <div className="container">
-          <div className={styles.badge}>Fair & Transparent Rules</div>
+          <div className={styles.badge}>
+            <span style={{ fontSize: '0.95rem' }}>⚖️</span>
+            <span>Fair & Transparent Rules</span>
+          </div>
           <h1 className={styles.title}>
             How <span className={styles.highlight}>GolfForGood</span> Works
           </h1>

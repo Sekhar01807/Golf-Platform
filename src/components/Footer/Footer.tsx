@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import Logo from '@/components/Logo/Logo';
 import styles from './Footer.module.css';
 
 export default function Footer() {
@@ -8,7 +9,7 @@ export default function Footer() {
         <div className={styles.footerGrid}>
           <div className={styles.brand}>
             <Link href="/" className={styles.logo}>
-              <div className={styles.logoMark}>⛳</div>
+              <Logo size={36} />
               <span>GolfForGood</span>
             </Link>
             <p className={styles.tagline}>

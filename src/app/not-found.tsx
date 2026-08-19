@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import Logo from '@/components/Logo/Logo';
 
 export default function NotFound() {
   const router = useRouter();
@@ -53,16 +54,10 @@ export default function NotFound() {
             display: 'inline-flex',
             alignItems: 'center',
             justifyContent: 'center',
-            width: '72px',
-            height: '72px',
-            borderRadius: '50%',
-            background: 'var(--color-primary-subtle, rgba(33, 78, 52, 0.08))',
-            color: 'var(--color-primary, #214E34)',
-            fontSize: '2.2rem',
             marginBottom: '1.5rem',
           }}
         >
-          ⛳
+          <Logo size={64} />
         </div>
 
         <div

@@ -4,6 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
+import Logo from '@/components/Logo/Logo';
 import styles from '../auth.module.css';
 
 export default function LoginPage() {
@@ -35,7 +36,9 @@ export default function LoginPage() {
     <div className={styles.authPage}>
       <div className={styles.authCard}>
         <div className={styles.authHeader}>
-          <div className={styles.authBadge}>⛳</div>
+          <div style={{ display: 'inline-flex', marginBottom: '1rem' }}>
+            <Logo size={52} />
+          </div>
           <h1>Welcome Back</h1>
           <p>Sign in to your GolfForGood account</p>
         </div>

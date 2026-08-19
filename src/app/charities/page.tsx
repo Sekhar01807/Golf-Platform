@@ -97,7 +97,10 @@ export default async function CharitiesPage() {
     <main className={styles.page}>
       <section className={styles.hero}>
         <div className="container">
-          <div className={styles.heroBadge}>🌿 Meaningful Impact</div>
+          <div className={styles.heroBadge}>
+            <span style={{ fontSize: '0.95rem' }}>🌿</span>
+            <span>Meaningful Impact</span>
+          </div>
           <h1 className={styles.title}>
             Partner <span className={styles.highlight}>Charities</span>
           </h1>
