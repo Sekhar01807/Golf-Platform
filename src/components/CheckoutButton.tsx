@@ -27,8 +27,7 @@ export default function CheckoutButton({ plan, className, children }: CheckoutBu
       } else {
         alert(data.error || 'Failed to initialize checkout');
       }
-    } catch (err) {
-      console.error('Checkout error:', err);
+    } catch {
       alert('An error occurred during checkout');
     } finally {
       setLoading(false);

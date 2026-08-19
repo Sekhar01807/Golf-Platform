@@ -31,7 +31,6 @@ export async function logAdminAction({
   });
 
   if (error) {
-    console.error('[Critical Audit Log Failure]:', error);
     if (failClosed) {
       throw new Error(`Mandatory audit record creation failed for action ${action}: ${error.message}`);
     }

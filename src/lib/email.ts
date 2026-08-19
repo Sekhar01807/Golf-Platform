@@ -20,11 +20,9 @@ export async function sendEmail({
   if (!resend) {
     if (process.env.NODE_ENV === 'production') {
       const err = 'Email service not configured: RESEND_API_KEY is required in production.';
-      console.error('[Production Email Error]:', err);
       return { success: false, error: err, mocked: false };
     }
 
-    console.warn(`[Email Mock (Dev)] To: ${to} | Subject: ${subject}`);
     return { success: true, mocked: true };
   }
 
@@ -38,7 +36,6 @@ export async function sendEmail({
 
     return { success: true, data };
   } catch (error) {
-    console.error('Error sending email via Resend:', error);
     return { success: false, error, mocked: false };
   }
 }

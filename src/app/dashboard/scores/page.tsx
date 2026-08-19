@@ -24,8 +24,7 @@ export default function ScoresPage() {
       } else {
         showToast('Failed to load scores from server', 'error');
       }
-    } catch (err) {
-      console.error('Failed to fetch scores:', err);
+    } catch {
       showToast('Network error loading scores', 'error');
     } finally {
       setLoading(false);

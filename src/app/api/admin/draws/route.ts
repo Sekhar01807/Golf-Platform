@@ -60,7 +60,6 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ error: 'Invalid draw action payload' }, { status: 400 });
   } catch (err: any) {
-    console.error('Draw operation error:', err);
     return NextResponse.json({ error: err?.message || 'Failed to execute draw operation' }, { status: 500 });
   }
 }

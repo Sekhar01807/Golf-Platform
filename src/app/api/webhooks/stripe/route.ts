@@ -22,8 +22,7 @@ export async function POST(request: NextRequest) {
       sig,
       process.env.STRIPE_WEBHOOK_SECRET
     );
-  } catch (err) {
-    console.error('Webhook signature verification failed:', err);
+  } catch {
     return NextResponse.json({ error: 'Invalid signature' }, { status: 400 });
   }
 
@@ -60,7 +59,6 @@ export async function POST(request: NextRequest) {
           .eq('id', event.id);
 
         if (reclaimErr) {
-          console.error('Stripe event re-claim failed:', reclaimErr);
           return NextResponse.json({ error: 'Database idempotency claim failed' }, { status: 500 });
         }
       } else {
@@ -77,7 +75,6 @@ export async function POST(request: NextRequest) {
               return NextResponse.json({ received: true, duplicate: true });
             }
           }
-          console.error('Stripe idempotency database claim failed (failing closed):', insertErr);
           return NextResponse.json({ error: 'Database idempotency claim failed' }, { status: 500 });
         }
       }
@@ -89,8 +86,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ received: true, in_flight: true });
       }
     }
-  } catch (claimException) {
-    console.error('Stripe idempotency check exception (failing closed):', claimException);
+  } catch {
     return NextResponse.json({ error: 'Database idempotency claim exception' }, { status: 500 });
   }
 
@@ -121,7 +117,6 @@ export async function POST(request: NextRequest) {
           });
 
           if (rpcErr) {
-            console.error('Failed to record completed donation via atomic RPC:', rpcErr);
             throw new Error(`Atomic donation recording failed: ${rpcErr.message}`);
           }
           break;
@@ -145,12 +140,10 @@ export async function POST(request: NextRequest) {
           .single();
 
         if (userFetchErr || !userRecord) {
-          console.error(`Webhook user fetch error: User ${userId}`, userFetchErr);
           throw new Error(`User ${userId} not found: ${userFetchErr?.message || 'record missing'}`);
         }
 
         if (userRecord.stripe_customer_id && userRecord.stripe_customer_id !== customerId) {
-          console.error(`Webhook customer mismatch: User ${userId} is bound to customer ${userRecord.stripe_customer_id}, but event received ${customerId}.`);
           throw new Error('Stripe customer ID binding mismatch');
         }
 
@@ -166,8 +159,8 @@ export async function POST(request: NextRequest) {
             if ((subObj as any).current_period_start) {
               startDate = new Date((subObj as any).current_period_start * 1000).toISOString();
             }
-          } catch (subErr) {
-            console.warn('Could not fetch subscription dates directly from Stripe:', subErr);
+          } catch {
+            // Subscription retrieve fallback to default period
           }
         }
 
@@ -189,7 +182,6 @@ export async function POST(request: NextRequest) {
         }).eq('id', userId);
 
         if (userUpdateErr) {
-          console.error('Failed to update user subscription status in database:', userUpdateErr);
           throw new Error(`Failed to activate subscription in database: ${userUpdateErr.message}`);
         }
 
@@ -199,7 +191,7 @@ export async function POST(request: NextRequest) {
             to: user.email,
             subject: 'Welcome to GolfCharity — Subscription Confirmed!',
             html: `<h1>Thank you for joining GolfCharity, ${user.full_name || 'Member'}!</h1><p>Your ${plan} membership is now active. Enter your scores and support causes making real impact.</p>`,
-          }).catch(e => console.warn('Welcome email failed to send:', e));
+          }).catch(() => {});
         }
         break;
       }
@@ -217,7 +209,6 @@ export async function POST(request: NextRequest) {
           .single();
 
         if (userLookupErr || !targetUser) {
-          console.error(`Webhook subscription updated: No user found for customer ${customerId}:`, userLookupErr);
           throw new Error(`No user found for customer ${customerId}: ${userLookupErr?.message || 'not found'}`);
         }
 
@@ -241,7 +232,6 @@ export async function POST(request: NextRequest) {
 
         const { error: subUpdateErr } = await supabase.from('users').update(updatePayload).eq('id', targetUser.id);
         if (subUpdateErr) {
-          console.error('Failed to update subscription in users table:', subUpdateErr);
           throw new Error(`Failed to update subscription in database: ${subUpdateErr.message}`);
         }
         break;
@@ -258,7 +248,6 @@ export async function POST(request: NextRequest) {
         }).eq('stripe_customer_id', customerId);
 
         if (delUpdateErr) {
-          console.error('Failed to update users table on subscription deletion:', delUpdateErr);
           throw new Error(`Failed to cancel subscription in database: ${delUpdateErr.message}`);
         }
         break;
@@ -277,8 +266,8 @@ export async function POST(request: NextRequest) {
               if ((subObj as any).current_period_end) {
                 endDate = new Date((subObj as any).current_period_end * 1000).toISOString();
               }
-            } catch (err) {
-              console.warn('Could not retrieve subscription on invoice payment:', err);
+            } catch {
+              // Gracefully handle subscription retrieval
             }
           }
 
@@ -291,7 +280,6 @@ export async function POST(request: NextRequest) {
 
           const { error: invUpdateErr } = await supabase.from('users').update(updatePayload).eq('stripe_customer_id', customerId);
           if (invUpdateErr) {
-            console.error('Failed to update subscription_status on invoice payment success:', invUpdateErr);
             throw new Error(`Failed to record invoice payment success in database: ${invUpdateErr.message}`);
           }
         }
@@ -308,7 +296,6 @@ export async function POST(request: NextRequest) {
           }).eq('stripe_customer_id', customerId);
 
           if (failUpdateErr) {
-            console.error('Failed to update subscription_status to lapsed on payment failure:', failUpdateErr);
             throw new Error(`Failed to update subscription status to lapsed in database: ${failUpdateErr.message}`);
           }
         }
@@ -325,23 +312,20 @@ export async function POST(request: NextRequest) {
       }).eq('id', event.id);
 
       if (directUpdateErr) {
-        console.error('Failed both complete_stripe_event RPC and direct update (failing closed):', directUpdateErr);
         throw new Error(`Failed to record stripe event completion: ${directUpdateErr.message}`);
       }
     }
 
     return NextResponse.json({ received: true });
   } catch (handlerErr: any) {
-    console.error('Webhook business handler failure (failing closed & marking event failed for retry):', handlerErr);
-
     // Mark event as failed in database so subsequent Stripe retry will re-claim and re-execute
     try {
       const { error: failErr } = await supabase.rpc('fail_stripe_event', { p_event_id: event.id });
       if (failErr) {
         await supabase.from('stripe_events').update({ status: 'failed' }).eq('id', event.id);
       }
-    } catch (cleanupErr) {
-      console.warn('Could not mark event failed in database cleanup:', cleanupErr);
+    } catch {
+      // Best-effort cleanup
     }
 
     // Fail closed: return HTTP 500 to trigger safe Stripe retry

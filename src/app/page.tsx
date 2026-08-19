@@ -35,8 +35,8 @@ export default async function HomePage() {
       winnersRewardedCount = `${winnersRes.count}`;
       isLiveMetrics = true;
     }
-  } catch (err) {
-    console.warn('Could not fetch dynamic homepage metrics, using benchmark data:', err);
+  } catch {
+    // Gracefully fallback to default benchmark metrics
   }
 
   const steps = [

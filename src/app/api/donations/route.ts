@@ -62,8 +62,7 @@ export async function POST(request: NextRequest) {
     });
 
     return NextResponse.json({ url: session.url });
-  } catch (error) {
-    console.error('Donation checkout error:', error);
+  } catch {
     return NextResponse.json({ error: 'Failed to initiate donation checkout' }, { status: 500 });
   }
 }

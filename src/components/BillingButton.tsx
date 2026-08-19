@@ -16,8 +16,7 @@ export default function BillingButton({ className, children }: { className?: str
       } else {
         alert(data.error || 'Failed to open billing portal');
       }
-    } catch (err) {
-      console.error(err);
+    } catch {
       alert('Failed to connect to billing server');
     } finally {
       setLoading(false);

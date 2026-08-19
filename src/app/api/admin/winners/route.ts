@@ -87,7 +87,6 @@ export async function PATCH(request: NextRequest) {
 
     return NextResponse.json(updated);
   } catch (err: any) {
-    console.error('Winner update error:', err);
     return NextResponse.json({ error: err?.message || 'Failed to update winner' }, { status: 500 });
   }
 }

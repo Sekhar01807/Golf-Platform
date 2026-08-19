@@ -56,8 +56,7 @@ export default function CharityPage() {
         const total = (donations || []).reduce((sum, d) => sum + Number(d.amount), 0);
         setTotalDonated(total);
       }
-    } catch (err) {
-      console.error('Failed to load charity data:', err);
+    } catch {
       showToast('Failed to load charity preferences', 'error');
     } finally {
       setLoading(false);
@@ -86,7 +85,6 @@ export default function CharityPage() {
         showToast('Charity preferences updated successfully!', 'success');
       }
     } catch (err: any) {
-      console.error('Failed to save:', err);
       showToast(err?.message || 'Failed to save preferences', 'error');
     } finally {
       setSaving(false);

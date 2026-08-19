@@ -89,8 +89,8 @@ export default async function CharitiesPage() {
     if (!error && charities && charities.length > 0) {
       charityList = charities as any;
     }
-  } catch (e) {
-    console.warn('Using default charities fallback:', e);
+  } catch {
+    // Graceful fallback to static charity data
   }
 
   return (

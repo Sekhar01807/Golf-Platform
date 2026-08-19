@@ -35,8 +35,7 @@ export default function WinningsPage() {
 
       if (error) throw error;
       setWinnings(data || []);
-    } catch (err: any) {
-      console.error('Fetch winnings error:', err);
+    } catch {
       showToast('Failed to load your prize winnings', 'error');
     } finally {
       setLoading(false);
@@ -72,7 +71,6 @@ export default function WinningsPage() {
       setSelectedWinnerId(null);
       await fetchWinnings();
     } catch (err: any) {
-      console.error('Proof upload error:', err);
       showToast(err?.message || 'Failed to submit proof URL', 'error');
     } finally {
       setUploading(false);

@@ -23,13 +23,11 @@ export async function GET() {
       .limit(5);
 
     if (error) {
-      console.error('Failed to fetch scores:', error);
       return NextResponse.json({ error: 'Failed to retrieve golf scores' }, { status: 500 });
     }
 
     return NextResponse.json(scores || []);
-  } catch (error) {
-    console.error('Scores fetch error:', error);
+  } catch {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
@@ -63,7 +61,6 @@ export async function POST(request: NextRequest) {
     });
 
     if (rpcError) {
-      console.error('Transactional add_golf_score RPC error:', rpcError);
       return NextResponse.json(
         { error: 'Failed to record score transactionally. Ensure database functions are migrated.' },
         { status: 500 }
@@ -77,8 +74,7 @@ export async function POST(request: NextRequest) {
       .single();
 
     return NextResponse.json(insertedScore || { id: scoreId, user_id: user.id, score, date_played }, { status: 201 });
-  } catch (error) {
-    console.error('Score insert exception:', error);
+  } catch {
     return NextResponse.json({ error: 'Failed to process score submission' }, { status: 500 });
   }
 }

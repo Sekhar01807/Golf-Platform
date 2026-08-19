@@ -59,7 +59,6 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(created, { status: 201 });
   } catch (err: any) {
-    console.error('Charity creation error:', err);
     return NextResponse.json({ error: err?.message || 'Failed to create charity' }, { status: 500 });
   }
 }
@@ -113,7 +112,6 @@ export async function DELETE(request: NextRequest) {
 
     return NextResponse.json({ success: true });
   } catch (err: any) {
-    console.error('Charity deletion error:', err);
     return NextResponse.json({ error: err?.message || 'Failed to delete charity' }, { status: 500 });
   }
 }
@@ -155,7 +153,6 @@ export async function PATCH(request: NextRequest) {
 
     return NextResponse.json(updated);
   } catch (err: any) {
-    console.error('Charity patch error:', err);
     return NextResponse.json({ error: err?.message || 'Failed to update charity' }, { status: 500 });
   }
 }
