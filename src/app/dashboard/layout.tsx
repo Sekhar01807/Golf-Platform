@@ -5,15 +5,26 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import Logo from '@/components/Logo/Logo';
+import {
+  DashboardIcon,
+  ScorecardIcon,
+  HeartIcon,
+  TicketIcon,
+  TrophyIcon,
+  CreditCardIcon,
+  UserIcon,
+  SettingsIcon,
+  LogoutIcon,
+} from '@/components/Icons/Icons';
 import styles from './dashboard.module.css';
 
 const navItems = [
-  { href: '/dashboard', icon: '📊', label: 'Dashboard' },
-  { href: '/dashboard/scores', icon: '⛳', label: 'Golf Scores' },
-  { href: '/dashboard/charity', icon: '💚', label: 'My Charity' },
-  { href: '/dashboard/draws', icon: '🎰', label: 'Monthly Draws' },
-  { href: '/dashboard/winnings', icon: '🏆', label: 'Prize Winnings' },
-  { href: '/dashboard/subscription', icon: '💳', label: 'Subscription' },
+  { href: '/dashboard', icon: <DashboardIcon size={18} />, label: 'Dashboard' },
+  { href: '/dashboard/scores', icon: <ScorecardIcon size={18} />, label: 'Golf Scores' },
+  { href: '/dashboard/charity', icon: <HeartIcon size={18} />, label: 'My Charity' },
+  { href: '/dashboard/draws', icon: <TicketIcon size={18} />, label: 'Monthly Draws' },
+  { href: '/dashboard/winnings', icon: <TrophyIcon size={18} />, label: 'Prize Winnings' },
+  { href: '/dashboard/subscription', icon: <CreditCardIcon size={18} />, label: 'Subscription' },
 ];
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -154,7 +165,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 className={styles.popupItem}
                 onClick={() => setProfilePopupOpen(false)}
               >
-                <span>👤</span>
+                <UserIcon size={16} />
                 <span>My Profile</span>
               </Link>
 
@@ -163,7 +174,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 className={styles.popupItem}
                 onClick={() => setProfilePopupOpen(false)}
               >
-                <span>⚙️</span>
+                <SettingsIcon size={16} />
                 <span>Account Settings</span>
               </Link>
 
@@ -177,7 +188,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                   handleLogout();
                 }}
               >
-                <span>🚪</span>
+                <LogoutIcon size={16} />
                 <span>Log Out</span>
               </button>
             </div>

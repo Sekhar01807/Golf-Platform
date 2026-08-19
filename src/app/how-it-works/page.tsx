@@ -9,33 +9,33 @@ export const metadata = {
 export default function HowItWorksPage() {
   const steps = [
     {
-      icon: '🎯',
-      title: '1. Select Your Plan',
+      num: '01',
+      title: 'Select Your Plan',
       desc: 'Choose a flexible monthly membership (₹499/mo) or save 17% with an annual pass (₹4,999/yr). A fixed percentage immediately funds your chosen charity.',
     },
     {
-      icon: '⛳',
-      title: '2. Log Stableford Scores',
+      num: '02',
+      title: 'Log Stableford Scores',
       desc: 'Enter up to 5 of your latest Stableford golf scores (1–45) with dates played. When you log new rounds, our system automatically keeps the 5 newest scores via FIFO.',
     },
     {
-      icon: '💚',
-      title: '3. Direct Charity Impact',
+      num: '03',
+      title: 'Direct Charity Impact',
       desc: 'Select from 6 verified partner non-profits. Set your contribution percentage (10% to 50%) to direct funds directly to youth golf, veteran therapy, or conservation.',
     },
     {
-      icon: '🎰',
-      title: '4. Monthly Prize Draws',
+      num: '04',
+      title: 'Monthly Prize Draws',
       desc: 'Every month, 5 winning numbers are drawn. Match 5, 4, or 3 of your active score numbers to claim your share of the monthly prize pool.',
     },
     {
-      icon: '🏆',
-      title: '5. Verification & Payout',
+      num: '05',
+      title: 'Verification & Payout',
       desc: 'Prize winners upload a photo/screenshot proof of their round. Our administrators verify the scorecard and process the payout directly.',
     },
     {
-      icon: '📈',
-      title: '6. Track Everything',
+      num: '06',
+      title: 'Track Everything',
       desc: 'Your private dashboard provides full visibility over your score history, lifetime charitable donations, draw entries, and prize payouts.',
     },
   ];
@@ -52,7 +52,6 @@ export default function HowItWorksPage() {
       <section className={styles.hero}>
         <div className="container">
           <div className={styles.badge}>
-            <span style={{ fontSize: '0.95rem' }}>⚖️</span>
             <span>Fair & Transparent Rules</span>
           </div>
           <h1 className={styles.title}>
@@ -64,44 +63,51 @@ export default function HowItWorksPage() {
         </div>
       </section>
 
-      {/* Steps */}
-      <section className="section">
+      {/* Steps Grid */}
+      <section className={styles.stepsSection}>
         <div className="container">
-          <div className={styles.stepsGrid}>
-            {steps.map((step, i) => (
-              <div key={i} className={styles.stepCard}>
-                <div className={styles.stepIcon}>{step.icon}</div>
-                <div className={styles.stepNum}>Step 0{i + 1}</div>
-                <h3 className={styles.stepTitle}>{step.title}</h3>
-                <p className={styles.stepDesc}>{step.desc}</p>
+          <h2 className="section-title">Step-by-Step Overview</h2>
+          <p className="section-subtitle">
+            Everything you need to know about participating, giving, and winning.
+          </p>
+
+          <div className={styles.grid}>
+            {steps.map((step) => (
+              <div key={step.title} className={styles.card}>
+                <div className={styles.icon} style={{ fontSize: '0.95rem', fontWeight: 800, color: 'var(--color-primary)' }}>
+                  {step.num}
+                </div>
+                <h3 className={styles.cardTitle}>{step.title}</h3>
+                <p className={styles.cardDesc}>{step.desc}</p>
               </div>
             ))}
           </div>
         </div>
       </section>
 
-      {/* Prize Pool Distribution */}
-      <section className={`section ${styles.tableSection}`}>
+      {/* Prize Breakdown Table */}
+      <section className={styles.prizeSection}>
         <div className="container">
-          <h2 className={styles.sectionTitle}>Prize Pool Allocation Formula</h2>
-          <p className={styles.sectionSub}>
-            Pools are funded from monthly subscriber dues. Tier prizes are divided equally among all eligible winners.
+          <h2 className="section-title">Prize Pool Distribution</h2>
+          <p className="section-subtitle">
+            Transparent breakdown of monthly prize allocation across winning tiers.
           </p>
-          <div className="table-wrapper" style={{ maxWidth: 780, margin: '0 auto' }}>
-            <table className="table">
+
+          <div className={styles.tableWrapper}>
+            <table className={styles.table}>
               <thead>
                 <tr>
-                  <th>Tier & Match Type</th>
-                  <th>Pool Share</th>
-                  <th>Distribution Rule</th>
+                  <th>Winning Match Tier</th>
+                  <th>Share of Prize Pool</th>
+                  <th>Rollover & Distribution Policy</th>
                 </tr>
               </thead>
               <tbody>
-                {prizeBreakdown.map((row, i) => (
-                  <tr key={i}>
-                    <td style={{ fontWeight: 600, color: 'var(--color-text-primary)' }}>{row.match}</td>
-                    <td style={{ fontWeight: 700, color: 'var(--color-primary)' }}>{row.pool}</td>
-                    <td style={{ color: 'var(--color-text-secondary)' }}>{row.rollover}</td>
+                {prizeBreakdown.map((row) => (
+                  <tr key={row.match}>
+                    <td className={styles.matchCell}>{row.match}</td>
+                    <td>{row.pool}</td>
+                    <td>{row.rollover}</td>
                   </tr>
                 ))}
               </tbody>
@@ -111,15 +117,22 @@ export default function HowItWorksPage() {
       </section>
 
       {/* CTA */}
-      <section className="section" style={{ textAlign: 'center' }}>
+      <section className={styles.ctaSection}>
         <div className="container">
-          <h2 className={styles.sectionTitle}>Ready to Join?</h2>
-          <p className={styles.sectionSub}>
-            Start your membership today and your scores will be eligible for the next monthly draw.
-          </p>
-          <Link href="/auth/signup" className="btn btn-primary btn-lg">
-            Create Free Account
-          </Link>
+          <div className={styles.ctaCard}>
+            <h2 className={styles.ctaTitle}>Ready to Make Every Swing Count?</h2>
+            <p className={styles.ctaSubtitle}>
+              Join golfers across the country supporting noble causes while playing for verified monthly cash prizes.
+            </p>
+            <div className={styles.ctaActions}>
+              <Link href="/auth/signup" className="btn btn-accent btn-lg">
+                Join GolfForGood Today
+              </Link>
+              <Link href="/charities" className="btn btn-secondary btn-lg">
+                Explore Charity Partners
+              </Link>
+            </div>
+          </div>
         </div>
       </section>
     </div>

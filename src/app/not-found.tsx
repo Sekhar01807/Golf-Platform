@@ -112,7 +112,7 @@ export default function NotFound() {
               marginBottom: '2rem',
             }}
           >
-            <span>🔄 Redirecting to home fairway in <strong>{countdown}s</strong></span>
+            <span>Redirecting to home in <strong>{countdown}s</strong></span>
             <button
               onClick={() => setAutoRedirect(false)}
               style={{

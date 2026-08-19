@@ -139,7 +139,7 @@ export default function AdminWinnersPage() {
                             className="badge badge-active"
                             style={{ textDecoration: 'none' }}
                           >
-                            📷 View Proof
+                            View Proof
                           </a>
                         ) : (
                           <span className="badge badge-inactive">Missing</span>

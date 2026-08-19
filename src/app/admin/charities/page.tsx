@@ -232,7 +232,7 @@ export default function AdminCharitiesPage() {
                         onClick={() => toggleFeatured(c.id, c.is_featured)}
                         title="Click to toggle featured state"
                       >
-                        {c.is_featured ? '★ Featured' : 'Standard'}
+                        {c.is_featured ? 'Featured' : 'Standard'}
                       </button>
                     </td>
                     <td style={{ fontWeight: 700, color: 'var(--color-primary)' }}>

@@ -92,7 +92,7 @@ export default function AdminUsersPage() {
                     </td>
                     <td>
                       <span className={`badge ${u.role === 'admin' ? 'badge-primary' : 'badge-active'}`}>
-                        {u.role === 'admin' ? '🛡️ Admin' : '👤 User'}
+                        {u.role === 'admin' ? 'Admin' : 'User'}
                       </span>
                     </td>
                     <td style={{ textTransform: 'capitalize', fontWeight: 500, color: 'var(--color-text-primary)' }}>

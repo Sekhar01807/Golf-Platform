@@ -46,8 +46,12 @@ export default function SignupPage() {
     return (
       <div className={styles.authPage}>
         <div className={styles.authCard}>
-          <div className={styles.authHeader}>
-            <div className={styles.authBadge}>📩</div>
+            <div className={styles.authBadge}>
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect width="20" height="16" x="2" y="4" rx="2"></rect>
+                <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L1 7"></path>
+              </svg>
+            </div>
             <h1>Check Your Email</h1>
             <p>
               We have dispatched a confirmation link to <strong>{email}</strong>.
@@ -82,7 +86,8 @@ export default function SignupPage() {
               id="fullName"
               type="text"
               className="form-input"
-              placeholder="Sekhar V."
+              placeholder="Alex Morgan"
+              autoComplete="name"
               value={fullName}
               onChange={(e) => setFullName(e.target.value)}
               required
@@ -95,6 +100,7 @@ export default function SignupPage() {
               type="email"
               className="form-input"
               placeholder="you@domain.com"
+              autoComplete="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
@@ -107,6 +113,7 @@ export default function SignupPage() {
               type="password"
               className="form-input"
               placeholder="Min 6 characters"
+              autoComplete="new-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required

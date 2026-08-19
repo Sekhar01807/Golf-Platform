@@ -160,7 +160,7 @@ export default async function DrawsPage() {
                       <div style={{ marginLeft: '0.75rem' }}>
                         {draw.matches >= 3 ? (
                           <span className="badge badge-active" style={{ fontSize: '0.85rem', padding: '0.35rem 0.9rem' }}>
-                            🎉 Won {draw.winInfo?.matchType} — ₹{draw.winInfo?.prizeAmount?.toLocaleString('en-IN')}
+                            Won {draw.winInfo?.matchType} — ₹{draw.winInfo?.prizeAmount?.toLocaleString('en-IN')}
                           </span>
                         ) : (
                           <span style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)' }}>

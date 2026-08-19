@@ -98,7 +98,6 @@ export default async function CharitiesPage() {
       <section className={styles.hero}>
         <div className="container">
           <div className={styles.heroBadge}>
-            <span style={{ fontSize: '0.95rem' }}>🌿</span>
             <span>Meaningful Impact</span>
           </div>
           <h1 className={styles.title}>
@@ -142,7 +141,7 @@ export default async function CharitiesPage() {
 
                     {charity.upcoming_events && (
                       <div className={styles.eventBadge}>
-                        <span>📅</span> {charity.upcoming_events}
+                        {charity.upcoming_events}
                       </div>
                     )}
                   </div>

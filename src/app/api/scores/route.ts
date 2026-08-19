@@ -17,19 +17,19 @@ export async function GET() {
 
     const { data: scores, error } = await supabase
       .from('golf_scores')
-      .select('*')
+      .select('id, user_id, score, date_played, created_at')
       .eq('user_id', user.id)
       .order('date_played', { ascending: false })
-      .order('created_at', { ascending: false })
       .limit(5);
 
     if (error) {
-      return NextResponse.json({ error: 'Failed to retrieve golf scores' }, { status: 500 });
+      return NextResponse.json({ error: error.message || 'Failed to retrieve golf scores' }, { status: 500 });
     }
 
     return NextResponse.json(scores || []);
-  } catch {
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Internal server error';
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 

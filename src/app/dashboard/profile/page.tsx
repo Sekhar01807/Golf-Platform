@@ -4,9 +4,15 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 import { useToast } from '@/components/Toast/Toast';
+import {
+  ScorecardIcon,
+  BarChartIcon,
+  HeartIcon,
+  TicketIcon,
+  ShieldIcon,
+} from '@/components/Icons/Icons';
 
 interface GolfProfileData {
-  username: string;
   phone: string;
   location: string;
   handicapIndex: string;
@@ -37,9 +43,8 @@ export default function ProfilePage() {
   const [subscriptionStatus, setSubscriptionStatus] = useState('inactive');
   const [subscriptionPlan, setSubscriptionPlan] = useState<string | null>(null);
 
-  // 2. Golf Profile (Fresh/empty by default for new registrants)
+  // 2. Golf Profile (Domain-specific)
   const [golfProfile, setGolfProfile] = useState<GolfProfileData>({
-    username: '',
     phone: '',
     location: '',
     handicapIndex: '',
@@ -76,10 +81,7 @@ export default function ProfilePage() {
 
       const emailAddress = user.email || '';
       setEmail(emailAddress);
-
-      // Auto-derive username from email prefix (e.g. sekharsekhar1919)
-      const emailPrefix = emailAddress.split('@')[0] || 'golfer';
-      const defaultUsername = `@${emailPrefix.toLowerCase().replace(/[^a-z0-9_]/g, '')}`;
+      const emailPrefix = emailAddress.split('@')[0] || 'Golfer';
 
       // Fetch public.users profile
       const { data: profile } = await supabase
@@ -115,10 +117,9 @@ export default function ProfilePage() {
         setFullName(emailPrefix);
       }
 
-      // Load user metadata if filled by user, otherwise keep fresh
+      // Load user metadata if filled by user
       if (user.user_metadata?.golf_profile) {
         setGolfProfile({
-          username: user.user_metadata.golf_profile.username || defaultUsername,
           phone: user.user_metadata.golf_profile.phone || user.user_metadata?.phone || '',
           location: user.user_metadata.golf_profile.location || '',
           handicapIndex: user.user_metadata.golf_profile.handicapIndex || '',
@@ -133,7 +134,6 @@ export default function ProfilePage() {
       } else {
         setGolfProfile((prev) => ({
           ...prev,
-          username: defaultUsername,
           phone: user.user_metadata?.phone || '',
         }));
       }
@@ -180,7 +180,7 @@ export default function ProfilePage() {
         },
       });
 
-      showToast('Profile updated successfully!', 'success');
+      showToast('Profile details updated successfully!', 'success');
       setIsEditing(false);
     } catch {
       showToast('Failed to save profile changes', 'error');
@@ -236,11 +236,6 @@ export default function ProfilePage() {
                 <h2 style={{ fontSize: '1.6rem', fontWeight: 700, color: 'var(--color-text-primary)', margin: 0 }}>
                   {fullName}
                 </h2>
-                {golfProfile.username && (
-                  <span style={{ fontSize: '0.95rem', color: 'var(--color-primary)', fontWeight: 600 }}>
-                    {golfProfile.username}
-                  </span>
-                )}
                 <span className={`badge ${subscriptionStatus === 'active' ? 'badge-active' : 'badge-inactive'}`}>
                   {subscriptionStatus === 'active' ? `Active ${subscriptionPlan || 'Member'}` : 'Member'}
                 </span>
@@ -252,10 +247,10 @@ export default function ProfilePage() {
               </div>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem', marginTop: '0.5rem', flexWrap: 'wrap', fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>
-                <span>✉️ {email}</span>
-                {golfProfile.phone ? <span>📞 {golfProfile.phone}</span> : <span style={{ color: 'var(--color-text-muted)' }}>📞 Phone not added</span>}
-                {golfProfile.location ? <span>📍 {golfProfile.location}</span> : <span style={{ color: 'var(--color-text-muted)' }}>📍 Location not set</span>}
-                {createdAt && <span>🗓️ Member since {createdAt}</span>}
+                <span>Email: {email}</span>
+                {golfProfile.phone ? <span>Phone: {golfProfile.phone}</span> : <span style={{ color: 'var(--color-text-muted)' }}>Phone not set</span>}
+                {golfProfile.location ? <span>Location: {golfProfile.location}</span> : <span style={{ color: 'var(--color-text-muted)' }}>Location not set</span>}
+                {createdAt && <span>Member since: {createdAt}</span>}
               </div>
             </div>
           </div>
@@ -266,7 +261,7 @@ export default function ProfilePage() {
             onClick={() => setIsEditing(!isEditing)}
             style={{ fontWeight: 600 }}
           >
-            {isEditing ? '✕ Close Editor' : '✏️ Edit Profile'}
+            {isEditing ? 'Close Editor' : 'Edit Profile'}
           </button>
         </div>
 
@@ -287,17 +282,6 @@ export default function ProfilePage() {
                   onChange={(e) => setFullName(e.target.value)}
                   placeholder="e.g. Sekhar Reddy"
                   required
-                />
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Username</label>
-                <input
-                  type="text"
-                  className="form-input"
-                  value={golfProfile.username}
-                  onChange={(e) => setGolfProfile({ ...golfProfile, username: e.target.value })}
-                  placeholder="e.g. @sekhar"
                 />
               </div>
 
@@ -412,8 +396,8 @@ export default function ProfilePage() {
                 </select>
               </div>
 
-              <div className="form-group">
-                <label className="form-label">Typical Average Score</label>
+              <div className="form-group" style={{ gridColumn: 'span 2' }}>
+                <label className="form-label">Typical Average Score (18-Hole)</label>
                 <input
                   type="text"
                   className="form-input"
@@ -439,8 +423,8 @@ export default function ProfilePage() {
       {/* ── 2. Golf Profile (Domain-Specific Section) ── */}
       <div className="card" style={{ padding: '1.75rem' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
-          <h3 style={{ fontSize: '1.2rem', fontWeight: 700, color: 'var(--color-text-primary)', margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <span>⛳</span>
+          <h3 style={{ fontSize: '1.2rem', fontWeight: 700, color: 'var(--color-text-primary)', margin: 0, display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+            <ScorecardIcon size={20} color="var(--color-primary)" />
             <span>Golf Profile</span>
           </h3>
           {!isEditing && (
@@ -450,7 +434,7 @@ export default function ProfilePage() {
               onClick={() => setIsEditing(true)}
               style={{ fontSize: '0.8rem' }}
             >
-              Edit Golf Details
+              Edit Details
             </button>
           )}
         </div>
@@ -534,8 +518,8 @@ export default function ProfilePage() {
       <div className="card" style={{ padding: '1.75rem' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.5rem' }}>
           <div>
-            <h3 style={{ fontSize: '1.2rem', fontWeight: 700, color: 'var(--color-text-primary)', margin: '0 0 2px 0', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <span>📊</span>
+            <h3 style={{ fontSize: '1.2rem', fontWeight: 700, color: 'var(--color-text-primary)', margin: '0 0 2px 0', display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+              <BarChartIcon size={20} color="var(--color-primary)" />
               <span>Performance Statistics</span>
             </h3>
             <p style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', margin: 0 }}>
@@ -573,8 +557,8 @@ export default function ProfilePage() {
 
       {/* ── 4. Recent Activity ── */}
       <div className="card" style={{ padding: '1.75rem' }}>
-        <h3 style={{ fontSize: '1.2rem', fontWeight: 700, color: 'var(--color-text-primary)', marginBottom: '1.25rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <span>⛳</span>
+        <h3 style={{ fontSize: '1.2rem', fontWeight: 700, color: 'var(--color-text-primary)', marginBottom: '1.25rem', display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+          <ScorecardIcon size={20} color="var(--color-primary)" />
           <span>Recent Activity</span>
         </h3>
 
@@ -593,15 +577,12 @@ export default function ProfilePage() {
                   border: '1px solid var(--color-border-subtle)',
                 }}
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
-                  <span style={{ fontSize: '1.3rem' }}>🏌️</span>
-                  <div>
-                    <div style={{ fontWeight: 600, color: 'var(--color-text-primary)', fontSize: '0.92rem' }}>
-                      Logged 18-Hole Round {golfProfile.homeCourse ? `at ${golfProfile.homeCourse}` : ''}
-                    </div>
-                    <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
-                      Played on {new Date(round.date_played).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                    </div>
+                <div>
+                  <div style={{ fontWeight: 600, color: 'var(--color-text-primary)', fontSize: '0.92rem' }}>
+                    18-Hole Round {golfProfile.homeCourse ? `at ${golfProfile.homeCourse}` : ''}
+                  </div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
+                    Played on {new Date(round.date_played).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                   </div>
                 </div>
                 <div style={{ fontWeight: 700, color: 'var(--color-primary)', fontSize: '1.1rem' }}>
@@ -627,15 +608,12 @@ export default function ProfilePage() {
               border: '1px solid var(--color-border-subtle)',
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
-              <span style={{ fontSize: '1.3rem' }}>🎰</span>
-              <div>
-                <div style={{ fontWeight: 600, color: 'var(--color-text-primary)', fontSize: '0.92rem' }}>
-                  Monthly Prize Draw Participation
-                </div>
-                <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
-                  {subscriptionStatus === 'active' ? 'Active entry linked to your verified 5-round score average' : 'Subscribe to enter monthly skill prize draws'}
-                </div>
+            <div>
+              <div style={{ fontWeight: 600, color: 'var(--color-text-primary)', fontSize: '0.92rem' }}>
+                Monthly Prize Draw Participation
+              </div>
+              <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
+                {subscriptionStatus === 'active' ? 'Active entry linked to your verified 5-round score average' : 'Subscribe to enter monthly skill prize draws'}
               </div>
             </div>
             <Link href="/dashboard/draws" style={{ fontSize: '0.825rem', color: 'var(--color-primary)', fontWeight: 600 }}>
@@ -655,15 +633,12 @@ export default function ProfilePage() {
               border: '1px solid var(--color-border-subtle)',
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
-              <span style={{ fontSize: '1.3rem' }}>💚</span>
-              <div>
-                <div style={{ fontWeight: 600, color: 'var(--color-text-primary)', fontSize: '0.92rem' }}>
-                  Philanthropic Impact Allocation
-                </div>
-                <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
-                  {charityName ? `Directing ${charityPercentage}% of membership to ${charityName}` : 'Select a verified charity partner'}
-                </div>
+            <div>
+              <div style={{ fontWeight: 600, color: 'var(--color-text-primary)', fontSize: '0.92rem' }}>
+                Philanthropic Impact Allocation
+              </div>
+              <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
+                {charityName ? `Directing ${charityPercentage}% of membership to ${charityName}` : 'Select a verified charity partner'}
               </div>
             </div>
             <Link href="/dashboard/charity" style={{ fontSize: '0.825rem', color: 'var(--color-primary)', fontWeight: 600 }}>
@@ -675,21 +650,21 @@ export default function ProfilePage() {
 
       {/* ── 5. Account Information (Compact) ── */}
       <div className="card" style={{ padding: '1.75rem' }}>
-        <h3 style={{ fontSize: '1.2rem', fontWeight: 700, color: 'var(--color-text-primary)', marginBottom: '1.25rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <span>🔒</span>
+        <h3 style={{ fontSize: '1.2rem', fontWeight: 700, color: 'var(--color-text-primary)', marginBottom: '1.25rem', display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+          <ShieldIcon size={20} color="var(--color-primary)" />
           <span>Account Information</span>
         </h3>
 
         <div className="grid grid-2" style={{ gap: '1rem' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.85rem 1rem', background: 'var(--color-bg-surface)', borderRadius: '8px' }}>
             <span style={{ color: 'var(--color-text-secondary)', fontSize: '0.875rem' }}>Email Verification</span>
-            <span style={{ color: '#2D6846', fontWeight: 600, fontSize: '0.875rem' }}>Verified ✅</span>
+            <span style={{ color: '#2D6846', fontWeight: 600, fontSize: '0.875rem' }}>Verified</span>
           </div>
 
           <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.85rem 1rem', background: 'var(--color-bg-surface)', borderRadius: '8px' }}>
             <span style={{ color: 'var(--color-text-secondary)', fontSize: '0.875rem' }}>Phone Verification</span>
             <span style={{ color: golfProfile.phone ? '#2D6846' : 'var(--color-text-muted)', fontWeight: 600, fontSize: '0.875rem' }}>
-              {golfProfile.phone ? 'Linked 📱' : 'Unlinked'}
+              {golfProfile.phone ? 'Linked' : 'Unlinked'}
             </span>
           </div>
 

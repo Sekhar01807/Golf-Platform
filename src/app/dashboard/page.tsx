@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server';
 import Link from 'next/link';
+import { ScorecardIcon, HeartIcon, TicketIcon } from '@/components/Icons/Icons';
 import styles from './dashboard.module.css';
 
 export const dynamic = 'force-dynamic';
@@ -96,7 +97,7 @@ export default async function DashboardOverview() {
   return (
     <div>
       <div className={styles.pageHeader}>
-        <h1 className={styles.pageTitle}>Good day, {userName} 👋</h1>
+        <h1 className={styles.pageTitle}>Good day, {userName}</h1>
         <p className={styles.pageSubtitle}>Track your golf performance and your charitable contributions.</p>
       </div>
 
@@ -168,17 +169,23 @@ export default async function DashboardOverview() {
       {/* Interactive Quick Links Grid (Clean Next.js Links) */}
       <div className="grid-3">
         <Link href="/dashboard/scores" className={styles.quickLinkCard}>
-          <div className={styles.quickLinkIcon}>📝</div>
+          <div className={styles.quickLinkIcon} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <ScorecardIcon size={24} color="var(--color-primary)" />
+          </div>
           <h4 className={styles.quickLinkTitle}>Enter Score</h4>
           <p className={styles.quickLinkDesc}>Log a new 18-hole Stableford round</p>
         </Link>
         <Link href="/dashboard/charity" className={styles.quickLinkCard}>
-          <div className={styles.quickLinkIcon}>💚</div>
+          <div className={styles.quickLinkIcon} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <HeartIcon size={24} color="var(--color-primary)" />
+          </div>
           <h4 className={styles.quickLinkTitle}>My Charity</h4>
           <p className={styles.quickLinkDesc}>Adjust your percentage & supported cause</p>
         </Link>
         <Link href="/dashboard/draws" className={styles.quickLinkCard}>
-          <div className={styles.quickLinkIcon}>🎰</div>
+          <div className={styles.quickLinkIcon} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <TicketIcon size={24} color="var(--color-primary)" />
+          </div>
           <h4 className={styles.quickLinkTitle}>Next Draw</h4>
           <p className={styles.quickLinkDesc}>Check eligible numbers & jackpot pool</p>
         </Link>

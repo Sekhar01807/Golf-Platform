@@ -21,8 +21,11 @@ export default function ScoresPage() {
       if (res.ok) {
         const data = await res.json();
         setScores(data || []);
+      } else if (res.status === 401) {
+        showToast('Please sign in to view and submit scores', 'warning');
       } else {
-        showToast('Failed to load scores from server', 'error');
+        const errData = await res.json().catch(() => null);
+        showToast(errData?.error || 'Failed to load scores from server', 'error');
       }
     } catch {
       showToast('Network error loading scores', 'error');
@@ -53,17 +56,17 @@ export default function ScoresPage() {
         body: JSON.stringify({ score: scoreNum, date_played: newDate }),
       });
 
-      const responseData = await res.json();
+      const data = await res.json();
 
       if (res.ok) {
+        showToast('Score recorded successfully! (Kept in 5-round FIFO)', 'success');
         setNewScore('');
-        showToast(`Score of ${scoreNum} logged successfully!`, 'success');
-        await fetchScores();
+        fetchScores();
       } else {
-        showToast(responseData.error || 'Failed to submit score', 'error');
+        showToast(data.error || 'Failed to record score', 'error');
       }
     } catch {
-      showToast('Network error while saving score. Please retry.', 'error');
+      showToast('Network error submitting score', 'error');
     } finally {
       setSubmitting(false);
     }

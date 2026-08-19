@@ -115,7 +115,7 @@ export default function AdminDrawsPage() {
           </p>
         </div>
         <button className="btn btn-primary" onClick={handleSimulate} disabled={simulating}>
-          {simulating ? 'Simulating...' : '🎲 Run Monthly Draw Simulation'}
+          {simulating ? 'Simulating...' : 'Run Monthly Draw Simulation'}
         </button>
       </div>
 
@@ -246,7 +246,7 @@ export default function AdminDrawsPage() {
                           d.status === 'locked' ? 'badge-primary' : d.status === 'published' ? 'badge-active' : 'badge-pending'
                         }`}
                       >
-                        {d.status === 'locked' ? '🔒 Locked' : d.status}
+                        {d.status === 'locked' ? 'Locked' : d.status}
                       </span>
                     </td>
                     <td>
@@ -287,7 +287,7 @@ export default function AdminDrawsPage() {
                         )}
                         {d.status === 'published' && (
                           <button className="btn btn-secondary btn-sm" onClick={() => handleLock(d.id)}>
-                            Lock Result 🔒
+                            Lock Result
                           </button>
                         )}
                         {d.status === 'locked' && (

@@ -109,20 +109,32 @@
   text-align: center;
 }
 
-/* User Profile Footer */
+/* ── User Profile Footer in Sidebar (with popup menu) ── */
 .sidebarFooter {
-  padding: 1rem 0.85rem 1.25rem;
-  border-top: 1px solid rgba(255, 255, 255, 0.07);
-  background: rgba(0, 0, 0, 0.2);
+  padding: 0.75rem 0.85rem 1rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.25);
+  position: relative;
 }
 
-.userProfileCard {
+.userProfileTrigger {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 0.6rem;
+  gap: 0.75rem;
+  width: 100%;
   padding: 0.5rem 0.6rem;
   border-radius: 8px;
+  background: transparent;
+  border: 1px solid transparent;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.15s ease;
+}
+
+.userProfileTrigger:hover,
+.userProfileTrigger.open {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.12);
 }
 
 .userAvatar {
@@ -165,23 +177,75 @@
   text-overflow: ellipsis;
 }
 
-.signOutBtn {
-  background: none;
-  border: none;
+.sidebarChevron {
   color: rgba(255, 255, 255, 0.5);
-  cursor: pointer;
-  padding: 0.4rem;
-  border-radius: 6px;
-  font-size: 1rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.15s ease;
+  font-size: 0.65rem;
+  transition: transform 0.2s ease;
+  margin-left: auto;
 }
 
-.signOutBtn:hover {
+.sidebarChevron.rotate {
+  transform: rotate(180deg);
+}
+
+/* Sidebar Profile Dropdown (Smooth downward expansion) */
+.sidebarProfilePopup {
+  margin-top: 0.4rem;
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  padding: 0.3rem;
+  overflow: hidden;
+  animation: smoothExpand 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes smoothExpand {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.popupItem {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.6rem 0.75rem;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.85);
+  text-decoration: none;
+  background: none;
+  border: none;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.popupItem:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #FFFFFF;
+}
+
+.popupDivider {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.08);
+  margin: 0.25rem 0;
+}
+
+.popupLogout {
+  color: #FF8787;
+}
+
+.popupLogout:hover {
+  background: rgba(255, 107, 107, 0.15);
   color: #FF6B6B;
-  background: rgba(255, 107, 107, 0.12);
 }
 
 /* ── Main Dashboard Workspace ── */
@@ -198,7 +262,7 @@
 .topbar {
   background: #FFFFFF;
   border-bottom: 1px solid var(--color-border, #E3E8E3);
-  padding: 1rem 2rem;
+  padding: 1.1rem 2rem;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -232,31 +296,28 @@
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
-  padding: 0.5rem 1rem;
+  padding: 0.55rem 1.15rem;
   border-radius: 8px;
-  font-size: 0.85rem;
+  font-size: 0.875rem;
   font-weight: 600;
   text-decoration: none;
-  transition: all 0.15s ease;
+  transition: all 0.18s ease;
 }
 
+/* Vivid, high-contrast submit button that brightens on hover instead of blending */
 .topbarActionPrimary {
   background: var(--color-primary, #214E34);
-  color: #FFFFFF;
+  color: #FFFFFF !important;
+  box-shadow: 0 2px 6px rgba(33, 78, 52, 0.2);
+  border: 1px solid transparent;
 }
 
 .topbarActionPrimary:hover {
-  background: var(--color-primary-hover, #173B26);
-}
-
-.topbarActionSecondary {
-  background: var(--color-bg-surface, #F0F3EE);
-  color: var(--color-text-primary, #18231C);
-  border: 1px solid var(--color-border, #E3E8E3);
-}
-
-.topbarActionSecondary:hover {
-  background: var(--color-bg-elevated, #EFF2EC);
+  background: #2D6846;
+  color: #FFFFFF !important;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(45, 104, 70, 0.35);
+  border-color: rgba(116, 198, 157, 0.4);
 }
 
 /* Content Area */

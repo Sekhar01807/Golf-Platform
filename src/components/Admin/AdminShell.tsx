@@ -1,19 +1,28 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import Logo from '@/components/Logo/Logo';
+import {
+  DashboardIcon,
+  UsersIcon,
+  HeartIcon,
+  TicketIcon,
+  TrophyIcon,
+  BarChartIcon,
+  LogoutIcon,
+} from '@/components/Icons/Icons';
 import styles from '@/app/dashboard/dashboard.module.css';
 
 const adminNavItems = [
-  { href: '/admin', icon: '📊', label: 'Overview' },
-  { href: '/admin/users', icon: '👥', label: 'Users' },
-  { href: '/admin/charities', icon: '💚', label: 'Charities' },
-  { href: '/admin/draws', icon: '🎰', label: 'Draws & Engine' },
-  { href: '/admin/winners', icon: '🏆', label: 'Winners & Payouts' },
-  { href: '/admin/analytics', icon: '📈', label: 'Analytics' },
+  { href: '/admin', icon: <DashboardIcon size={18} />, label: 'Overview' },
+  { href: '/admin/users', icon: <UsersIcon size={18} />, label: 'Users' },
+  { href: '/admin/charities', icon: <HeartIcon size={18} />, label: 'Charities' },
+  { href: '/admin/draws', icon: <TicketIcon size={18} />, label: 'Draws & Engine' },
+  { href: '/admin/winners', icon: <TrophyIcon size={18} />, label: 'Winners & Payouts' },
+  { href: '/admin/analytics', icon: <BarChartIcon size={18} />, label: 'Analytics' },
 ];
 
 export default function AdminShell({
@@ -26,7 +35,24 @@ export default function AdminShell({
   const pathname = usePathname();
   const router = useRouter();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [profilePopupOpen, setProfilePopupOpen] = useState(false);
+  const popupRef = useRef<HTMLDivElement>(null);
   const supabase = createClient();
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (popupRef.current && !popupRef.current.contains(event.target as Node)) {
+        setProfilePopupOpen(false);
+      }
+    }
+
+    if (profilePopupOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [profilePopupOpen]);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -71,9 +97,15 @@ export default function AdminShell({
           })}
         </nav>
 
-        {/* User Profile Card (Bottom of Sidebar) */}
-        <div className={styles.sidebarFooter}>
-          <div className={styles.userProfileCard}>
+        {/* ── User Profile at Bottom of Sidebar (with Downward Popup Menu) ── */}
+        <div className={styles.sidebarFooter} ref={popupRef}>
+          <button
+            type="button"
+            className={`${styles.userProfileTrigger} ${profilePopupOpen ? styles.open : ''}`}
+            onClick={() => setProfilePopupOpen(!profilePopupOpen)}
+            aria-expanded={profilePopupOpen}
+            aria-label="Admin profile options"
+          >
             <div className={styles.userAvatar} style={{ background: 'linear-gradient(135deg, #D4A84F 0%, #B88E39 100%)', color: '#18231C' }}>
               {initial}
             </div>
@@ -85,15 +117,35 @@ export default function AdminShell({
                 Administrator
               </div>
             </div>
-            <button
-              onClick={handleLogout}
-              className={styles.signOutBtn}
-              title="Sign Out"
-              aria-label="Sign Out"
-            >
-              🚪
-            </button>
-          </div>
+            <span className={`${styles.sidebarChevron} ${profilePopupOpen ? styles.rotate : ''}`}>▼</span>
+          </button>
+
+          {profilePopupOpen && (
+            <div className={styles.sidebarProfilePopup}>
+              <Link
+                href="/dashboard"
+                className={styles.popupItem}
+                onClick={() => setProfilePopupOpen(false)}
+              >
+                <DashboardIcon size={16} />
+                <span>Member Portal</span>
+              </Link>
+
+              <div className={styles.popupDivider} />
+
+              <button
+                type="button"
+                className={`${styles.popupItem} ${styles.popupLogout}`}
+                onClick={() => {
+                  setProfilePopupOpen(false);
+                  handleLogout();
+                }}
+              >
+                <LogoutIcon size={16} />
+                <span>Log Out</span>
+              </button>
+            </div>
+          )}
         </div>
       </aside>
 
@@ -108,13 +160,7 @@ export default function AdminShell({
 
           <div className={styles.topbarRight}>
             <Link href="/admin/draws" className={`${styles.topbarActionBtn} ${styles.topbarActionPrimary}`}>
-              <span>🎰 Simulate Draw</span>
-            </Link>
-            <Link href="/dashboard" className={`${styles.topbarActionBtn} ${styles.topbarActionSecondary}`}>
-              <span>Member Portal ↗</span>
-            </Link>
-            <Link href="/" className={`${styles.topbarActionBtn} ${styles.topbarActionSecondary}`} title="View Public Website">
-              <span>Home ↗</span>
+              <span>Simulate Draw</span>
             </Link>
           </div>
         </header>
