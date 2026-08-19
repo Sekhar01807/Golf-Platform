@@ -7,54 +7,64 @@ import { useToast } from '@/components/Toast/Toast';
 
 interface NotificationSettings {
   bookingConfirmations: boolean;
+  bookingReminders: boolean;
+  bookingCancellations: boolean;
   tournamentUpdates: boolean;
-  winningAlerts: boolean;
-  charityReports: boolean;
-  marketingEmails: boolean;
+  promotionalEmails: boolean;
+  platformAnnouncements: boolean;
 }
 
 interface UserPreferences {
   distanceUnit: 'Yards' | 'Meters';
   currency: string;
   timeZone: string;
+  language: string;
   defaultTee: string;
 }
 
 export default function SettingsPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
-  const [savingAccount, setSavingAccount] = useState(false);
-  const [updatingPassword, setUpdatingPassword] = useState(false);
-  const [savingPrefs, setSavingPrefs] = useState(false);
-  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
-  const [deleteInput, setDeleteInput] = useState('');
-  const [deleting, setDeleting] = useState(false);
 
-  // 1. Account Info
+  // Section 1: Account
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
+  const [newEmail, setNewEmail] = useState('');
   const [phone, setPhone] = useState('');
+  const [profileVisibility, setProfileVisibility] = useState<'Public' | 'Private' | 'Members Only'>('Public');
+  const [savingAccount, setSavingAccount] = useState(false);
+  const [updatingEmail, setUpdatingEmail] = useState(false);
 
-  // 2. Notifications
+  // Section 2: Notifications
   const [notifications, setNotifications] = useState<NotificationSettings>({
     bookingConfirmations: true,
+    bookingReminders: true,
+    bookingCancellations: true,
     tournamentUpdates: true,
-    winningAlerts: true,
-    charityReports: true,
-    marketingEmails: false,
+    promotionalEmails: false,
+    platformAnnouncements: true,
   });
 
-  // 3. Password
+  // Section 3: Privacy & Security
+  const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [updatingPassword, setUpdatingPassword] = useState(false);
 
-  // 4. Preferences
+  // Section 4: Preferences
   const [preferences, setPreferences] = useState<UserPreferences>({
     distanceUnit: 'Yards',
     currency: 'INR (₹)',
     timeZone: 'Asia/Kolkata (IST)',
+    language: 'English (US)',
     defaultTee: 'White (Standard)',
   });
+  const [savingPrefs, setSavingPrefs] = useState(false);
+
+  // Section 5: Danger Zone
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [deleteInput, setDeleteInput] = useState('');
+  const [deleting, setDeleting] = useState(false);
 
   const { showToast } = useToast();
   const supabase = createClient();
@@ -74,6 +84,7 @@ export default function SettingsPage() {
       }
 
       setEmail(user.email || '');
+      setNewEmail(user.email || '');
 
       const { data: profile } = await supabase
         .from('users')
@@ -85,8 +96,8 @@ export default function SettingsPage() {
         setFullName(profile.full_name || user.user_metadata?.full_name || '');
       }
 
-      // Load user preferences & notification settings from metadata
       if (user.user_metadata?.phone) setPhone(user.user_metadata.phone);
+      if (user.user_metadata?.profile_visibility) setProfileVisibility(user.user_metadata.profile_visibility);
       if (user.user_metadata?.notifications) {
         setNotifications((prev) => ({ ...prev, ...user.user_metadata.notifications }));
       }
@@ -94,13 +105,13 @@ export default function SettingsPage() {
         setPreferences((prev) => ({ ...prev, ...user.user_metadata.preferences }));
       }
     } catch {
-      showToast('Failed to load settings', 'error');
+      showToast('Failed to load account settings', 'error');
     } finally {
       setLoading(false);
     }
   };
 
-  // 1. Save Account Info
+  // 1. Save Account Info (Name, Phone, Profile Visibility)
   const handleSaveAccount = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
@@ -108,16 +119,25 @@ export default function SettingsPage() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
+      // Update public.users
       await supabase
         .from('users')
-        .update({ full_name: fullName.trim() })
+        .update({
+          full_name: fullName.trim(),
+          updated_at: new Date().toISOString(),
+        })
         .eq('id', user.id);
 
+      // Sync auth user metadata
       await supabase.auth.updateUser({
-        data: { full_name: fullName.trim(), phone: phone.trim() },
+        data: {
+          full_name: fullName.trim(),
+          phone: phone.trim(),
+          profile_visibility: profileVisibility,
+        },
       });
 
-      showToast('Account details saved successfully!', 'success');
+      showToast('Account details updated in database!', 'success');
     } catch {
       showToast('Failed to save account changes', 'error');
     } finally {
@@ -125,7 +145,32 @@ export default function SettingsPage() {
     }
   };
 
-  // 2. Toggle Notification
+  // Change Email (with confirmation email dispatch)
+  const handleUpdateEmail = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newEmail.trim() || newEmail === email) {
+      showToast('Please enter a different valid email address', 'warning');
+      return;
+    }
+
+    try {
+      setUpdatingEmail(true);
+      const { error } = await supabase.auth.updateUser({ email: newEmail.trim() });
+
+      if (error) {
+        showToast(error.message || 'Failed to update email address', 'error');
+        return;
+      }
+
+      showToast('Confirmation email sent! Please check your new inbox to verify.', 'info');
+    } catch {
+      showToast('An error occurred while updating email', 'error');
+    } finally {
+      setUpdatingEmail(false);
+    }
+  };
+
+  // 2. Toggle Notification Setting
   const handleToggleNotification = async (key: keyof NotificationSettings) => {
     const updated = { ...notifications, [key]: !notifications[key] };
     setNotifications(updated);
@@ -134,44 +179,93 @@ export default function SettingsPage() {
       await supabase.auth.updateUser({
         data: { notifications: updated },
       });
-      showToast('Notification preference updated', 'success');
+      showToast('Notification preference saved', 'success');
     } catch {
       showToast('Failed to update notification setting', 'error');
     }
   };
 
-  // 3. Update Password
+  // 3. Update Password (with Old Password Verification)
   const handleUpdatePassword = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (!currentPassword) {
+      showToast('Please enter your current password for confirmation', 'warning');
+      return;
+    }
     if (newPassword.length < 6) {
-      showToast('Password must be at least 6 characters', 'warning');
+      showToast('New password must be at least 6 characters long', 'warning');
       return;
     }
     if (newPassword !== confirmPassword) {
-      showToast('Passwords do not match', 'warning');
+      showToast('New passwords do not match', 'warning');
+      return;
+    }
+    if (currentPassword === newPassword) {
+      showToast('New password cannot be identical to your current password', 'warning');
       return;
     }
 
     try {
       setUpdatingPassword(true);
-      const { error } = await supabase.auth.updateUser({ password: newPassword });
-
-      if (error) {
-        showToast(error.message || 'Failed to update password', 'error');
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user || !user.email) {
+        showToast('Session expired. Please sign in again.', 'error');
         return;
       }
 
-      showToast('Password changed successfully!', 'success');
+      // Step 1: Cryptographically verify current password with Supabase Auth
+      const { error: verifyError } = await supabase.auth.signInWithPassword({
+        email: user.email,
+        password: currentPassword,
+      });
+
+      if (verifyError) {
+        showToast('Incorrect current password. Please re-enter your old password.', 'error');
+        return;
+      }
+
+      // Step 2: Cryptographically re-hash and update to new password
+      const { error: updateError } = await supabase.auth.updateUser({
+        password: newPassword,
+      });
+
+      if (updateError) {
+        showToast(updateError.message || 'Failed to update password', 'error');
+        return;
+      }
+
+      // Step 3: Record updated_at in database
+      await supabase
+        .from('users')
+        .update({ updated_at: new Date().toISOString() })
+        .eq('id', user.id);
+
+      showToast('Password updated and encrypted in database!', 'success');
+      setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
-    } catch {
-      showToast('Error updating password', 'error');
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Error updating password', 'error');
     } finally {
       setUpdatingPassword(false);
     }
   };
 
-  // 4. Save Preferences
+  // Sign out of all devices (Global JWT invalidation)
+  const handleSignOutAllDevices = async () => {
+    try {
+      await supabase.auth.signOut({ scope: 'global' });
+      showToast('Signed out of all devices and active sessions.', 'info');
+      router.push('/auth/login');
+      router.refresh();
+    } catch {
+      await supabase.auth.signOut();
+      router.push('/auth/login');
+    }
+  };
+
+  // 4. Save Golf & App Preferences
   const handleSavePreferences = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
@@ -196,8 +290,8 @@ export default function SettingsPage() {
 
     try {
       setDeleting(true);
-      await supabase.auth.signOut();
-      showToast('Account scheduled for permanent deletion', 'info');
+      await supabase.auth.signOut({ scope: 'global' });
+      showToast('Account scheduled for permanent removal.', 'info');
       router.push('/');
     } catch {
       showToast('Failed to process deletion request', 'error');
@@ -215,15 +309,15 @@ export default function SettingsPage() {
   }
 
   return (
-    <div style={{ maxWidth: '820px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+    <div style={{ maxWidth: '840px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '2rem' }}>
       
       {/* ── Section 1: Account ── */}
-      <div className="card">
-        <h3 style={{ fontSize: '1.2rem', fontWeight: 700, color: 'var(--color-text-primary)', marginBottom: '0.35rem' }}>
-          Account Information
+      <div className="card" style={{ padding: '1.75rem' }}>
+        <h3 style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--color-text-primary)', marginBottom: '0.35rem' }}>
+          Account Details
         </h3>
         <p style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)', marginBottom: '1.5rem' }}>
-          Update your public member credentials and contact info.
+          Manage your personal credentials, contact numbers, and public visibility.
         </p>
 
         <form onSubmit={handleSaveAccount}>
@@ -235,7 +329,7 @@ export default function SettingsPage() {
                 className="form-input"
                 value={fullName}
                 onChange={(e) => setFullName(e.target.value)}
-                placeholder="Your Name"
+                placeholder="Your Full Name"
                 required
               />
             </div>
@@ -247,171 +341,235 @@ export default function SettingsPage() {
                 className="form-input"
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
-                placeholder="+1 (555) 000-0000"
+                placeholder="+91 98765 43210"
               />
             </div>
           </div>
 
-          <div className="form-group" style={{ marginBottom: '1.5rem' }}>
-            <label className="form-label">Email Address</label>
-            <input
-              type="email"
+          <div className="form-group" style={{ marginBottom: '1.25rem' }}>
+            <label className="form-label">Profile Visibility</label>
+            <select
               className="form-input"
-              value={email}
-              disabled
-              style={{ background: 'var(--color-bg-elevated)', cursor: 'not-allowed', color: 'var(--color-text-muted)' }}
-            />
-            <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: '4px', display: 'block' }}>
-              Primary login email synced with Supabase authentication.
-            </span>
+              value={profileVisibility}
+              onChange={(e) => setProfileVisibility(e.target.value as 'Public' | 'Private' | 'Members Only')}
+            >
+              <option value="Public">Public (Visible on Golfer Leaderboards)</option>
+              <option value="Members Only">Members Only (Visible to logged-in subscribers)</option>
+              <option value="Private">Private (Hidden from public directory)</option>
+            </select>
           </div>
 
           <button type="submit" className="btn btn-primary btn-sm" disabled={savingAccount}>
-            {savingAccount ? 'Saving...' : 'Save Account Info'}
+            {savingAccount ? 'Saving...' : 'Save Account Details'}
           </button>
         </form>
+
+        {/* Change Email Sub-Form */}
+        <div style={{ marginTop: '1.75rem', paddingTop: '1.5rem', borderTop: '1px solid var(--color-border-subtle)' }}>
+          <h4 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--color-text-primary)', marginBottom: '0.35rem' }}>
+            Change Email Address
+          </h4>
+          <p style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', marginBottom: '1rem' }}>
+            Current email: <strong>{email}</strong>
+          </p>
+
+          <form onSubmit={handleUpdateEmail} style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+            <input
+              type="email"
+              className="form-input"
+              value={newEmail}
+              onChange={(e) => setNewEmail(e.target.value)}
+              placeholder="new.email@example.com"
+              style={{ maxWidth: '320px' }}
+              required
+            />
+            <button type="submit" className="btn btn-secondary btn-sm" disabled={updatingEmail || newEmail === email}>
+              {updatingEmail ? 'Sending Link...' : 'Change Email'}
+            </button>
+          </form>
+        </div>
       </div>
 
-      {/* ── Section 2: Notifications ── */}
-      <div className="card">
-        <h3 style={{ fontSize: '1.2rem', fontWeight: 700, color: 'var(--color-text-primary)', marginBottom: '0.35rem' }}>
-          Notification Preferences
+      {/* ── Section 2: Notifications (Simple Switch Toggles) ── */}
+      <div className="card" style={{ padding: '1.75rem' }}>
+        <h3 style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--color-text-primary)', marginBottom: '0.35rem' }}>
+          Notifications
         </h3>
         <p style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)', marginBottom: '1.5rem' }}>
-          Select which email and system updates you wish to receive.
+          Control which notifications, tournament updates, and reminders you receive.
         </p>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.75rem 1rem', background: 'var(--color-bg-surface)', borderRadius: '8px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.85rem 1.1rem', background: 'var(--color-bg-surface)', borderRadius: '8px' }}>
             <div>
               <div style={{ fontWeight: 600, fontSize: '0.9rem', color: 'var(--color-text-primary)' }}>
-                Round Confirmations & Score Submissions
+                Booking & Round Confirmations
               </div>
               <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
-                Instant confirmation emails when submitting Stableford rounds
+                Email confirmations immediately upon submitting 18-hole scorecards
               </div>
             </div>
             <button
               type="button"
               onClick={() => handleToggleNotification('bookingConfirmations')}
               className={`btn btn-sm ${notifications.bookingConfirmations ? 'btn-primary' : 'btn-secondary'}`}
-              style={{ minWidth: '70px' }}
+              style={{ minWidth: '70px', fontWeight: 700 }}
             >
               {notifications.bookingConfirmations ? 'ON' : 'OFF'}
             </button>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.75rem 1rem', background: 'var(--color-bg-surface)', borderRadius: '8px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.85rem 1.1rem', background: 'var(--color-bg-surface)', borderRadius: '8px' }}>
             <div>
               <div style={{ fontWeight: 600, fontSize: '0.9rem', color: 'var(--color-text-primary)' }}>
-                Tournament & Monthly Draw Announcements
+                Booking & Score Reminders
               </div>
               <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
-                Notifications when draw numbers are published and finalized
+                Helpful reminders to submit your rounds before monthly draw lock dates
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => handleToggleNotification('bookingReminders')}
+              className={`btn btn-sm ${notifications.bookingReminders ? 'btn-primary' : 'btn-secondary'}`}
+              style={{ minWidth: '70px', fontWeight: 700 }}
+            >
+              {notifications.bookingReminders ? 'ON' : 'OFF'}
+            </button>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.85rem 1.1rem', background: 'var(--color-bg-surface)', borderRadius: '8px' }}>
+            <div>
+              <div style={{ fontWeight: 600, fontSize: '0.9rem', color: 'var(--color-text-primary)' }}>
+                Booking Cancellations & Status Changes
+              </div>
+              <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
+                Alerts if scorecards or prize claims require scorecard verification
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => handleToggleNotification('bookingCancellations')}
+              className={`btn btn-sm ${notifications.bookingCancellations ? 'btn-primary' : 'btn-secondary'}`}
+              style={{ minWidth: '70px', fontWeight: 700 }}
+            >
+              {notifications.bookingCancellations ? 'ON' : 'OFF'}
+            </button>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.85rem 1.1rem', background: 'var(--color-bg-surface)', borderRadius: '8px' }}>
+            <div>
+              <div style={{ fontWeight: 600, fontSize: '0.9rem', color: 'var(--color-text-primary)' }}>
+                Tournament & Monthly Draw Updates
+              </div>
+              <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
+                Broadcasts when monthly winning draw numbers and prize pots are published
               </div>
             </div>
             <button
               type="button"
               onClick={() => handleToggleNotification('tournamentUpdates')}
               className={`btn btn-sm ${notifications.tournamentUpdates ? 'btn-primary' : 'btn-secondary'}`}
-              style={{ minWidth: '70px' }}
+              style={{ minWidth: '70px', fontWeight: 700 }}
             >
               {notifications.tournamentUpdates ? 'ON' : 'OFF'}
             </button>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.75rem 1rem', background: 'var(--color-bg-surface)', borderRadius: '8px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.85rem 1.1rem', background: 'var(--color-bg-surface)', borderRadius: '8px' }}>
             <div>
               <div style={{ fontWeight: 600, fontSize: '0.9rem', color: 'var(--color-text-primary)' }}>
-                Prize Winning Alerts
+                Promotional Emails & Partner Perks
               </div>
               <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
-                Urgent notifications if your scorecard matches monthly prize draws
+                Discounts on golf equipment, course green fees, and exclusive member offers
               </div>
             </div>
             <button
               type="button"
-              onClick={() => handleToggleNotification('winningAlerts')}
-              className={`btn btn-sm ${notifications.winningAlerts ? 'btn-primary' : 'btn-secondary'}`}
-              style={{ minWidth: '70px' }}
+              onClick={() => handleToggleNotification('promotionalEmails')}
+              className={`btn btn-sm ${notifications.promotionalEmails ? 'btn-primary' : 'btn-secondary'}`}
+              style={{ minWidth: '70px', fontWeight: 700 }}
             >
-              {notifications.winningAlerts ? 'ON' : 'OFF'}
+              {notifications.promotionalEmails ? 'ON' : 'OFF'}
             </button>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.75rem 1rem', background: 'var(--color-bg-surface)', borderRadius: '8px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.85rem 1.1rem', background: 'var(--color-bg-surface)', borderRadius: '8px' }}>
             <div>
               <div style={{ fontWeight: 600, fontSize: '0.9rem', color: 'var(--color-text-primary)' }}>
-                Charity Impact & Giving Reports
+                Platform Announcements
               </div>
               <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
-                Monthly breakdown of funds directed to your selected charity partner
+                Important notices about terms, charity matching milestones, and platform features
               </div>
             </div>
             <button
               type="button"
-              onClick={() => handleToggleNotification('charityReports')}
-              className={`btn btn-sm ${notifications.charityReports ? 'btn-primary' : 'btn-secondary'}`}
-              style={{ minWidth: '70px' }}
+              onClick={() => handleToggleNotification('platformAnnouncements')}
+              className={`btn btn-sm ${notifications.platformAnnouncements ? 'btn-primary' : 'btn-secondary'}`}
+              style={{ minWidth: '70px', fontWeight: 700 }}
             >
-              {notifications.charityReports ? 'ON' : 'OFF'}
-            </button>
-          </div>
-
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.75rem 1rem', background: 'var(--color-bg-surface)', borderRadius: '8px' }}>
-            <div>
-              <div style={{ fontWeight: 600, fontSize: '0.9rem', color: 'var(--color-text-primary)' }}>
-                Promotional & Platform Newsletters
-              </div>
-              <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
-                Occasional product updates, partner perks, and member benefits
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={() => handleToggleNotification('marketingEmails')}
-              className={`btn btn-sm ${notifications.marketingEmails ? 'btn-primary' : 'btn-secondary'}`}
-              style={{ minWidth: '70px' }}
-            >
-              {notifications.marketingEmails ? 'ON' : 'OFF'}
+              {notifications.platformAnnouncements ? 'ON' : 'OFF'}
             </button>
           </div>
         </div>
       </div>
 
       {/* ── Section 3: Privacy & Security ── */}
-      <div className="card">
-        <h3 style={{ fontSize: '1.2rem', fontWeight: 700, color: 'var(--color-text-primary)', marginBottom: '0.35rem' }}>
+      <div className="card" style={{ padding: '1.75rem' }}>
+        <h3 style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--color-text-primary)', marginBottom: '0.35rem' }}>
           Privacy & Security
         </h3>
         <p style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)', marginBottom: '1.5rem' }}>
-          Manage your password and security credentials.
+          Cryptographically verify your credentials, change passwords, and manage active sessions.
         </p>
 
-        <form onSubmit={handleUpdatePassword} style={{ marginBottom: '1.5rem' }}>
+        <form onSubmit={handleUpdatePassword} style={{ marginBottom: '1.75rem' }}>
+          <div className="form-group" style={{ marginBottom: '1rem', maxWidth: '480px' }}>
+            <label className="form-label" htmlFor="currentPassword">Current (Old) Password</label>
+            <input
+              id="currentPassword"
+              type="password"
+              className="form-input"
+              value={currentPassword}
+              onChange={(e) => setCurrentPassword(e.target.value)}
+              placeholder="Enter your existing password"
+              autoComplete="current-password"
+              required
+            />
+            <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: '4px', display: 'block' }}>
+              Required for cryptographic verification before updating credentials.
+            </span>
+          </div>
+
           <div className="grid grid-2" style={{ gap: '1rem', marginBottom: '1rem' }}>
             <div className="form-group">
-              <label className="form-label">New Password</label>
+              <label className="form-label" htmlFor="newPassword">New Password</label>
               <input
+                id="newPassword"
                 type="password"
                 className="form-input"
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
                 placeholder="••••••••"
                 minLength={6}
+                autoComplete="new-password"
                 required
               />
             </div>
 
             <div className="form-group">
-              <label className="form-label">Confirm Password</label>
+              <label className="form-label" htmlFor="confirmPassword">Confirm New Password</label>
               <input
+                id="confirmPassword"
                 type="password"
                 className="form-input"
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
                 placeholder="••••••••"
                 minLength={6}
+                autoComplete="new-password"
                 required
               />
             </div>
@@ -420,67 +578,64 @@ export default function SettingsPage() {
           <button
             type="submit"
             className="btn btn-secondary btn-sm"
-            disabled={updatingPassword || !newPassword}
+            disabled={updatingPassword || !currentPassword || !newPassword}
           >
-            {updatingPassword ? 'Updating...' : 'Update Password'}
+            {updatingPassword ? 'Verifying & Updating...' : 'Update Password'}
           </button>
         </form>
 
-        <div style={{ paddingTop: '1.25rem', borderTop: '1px solid var(--color-border-subtle)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+        <div style={{ paddingTop: '1.5rem', borderTop: '1px solid var(--color-border-subtle)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
           <div>
-            <div style={{ fontWeight: 600, fontSize: '0.9rem', color: 'var(--color-text-primary)' }}>
+            <div style={{ fontWeight: 600, fontSize: '0.92rem', color: 'var(--color-text-primary)' }}>
               Active Sessions
             </div>
             <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
-              Current browser session active via Supabase JWT Bearer Tokens
+              Authenticated via Supabase JWT Bearer Tokens with cryptographic refresh rotation
             </div>
           </div>
 
           <button
             type="button"
             className="btn btn-secondary btn-sm"
-            onClick={async () => {
-              await supabase.auth.signOut();
-              router.push('/');
-            }}
+            onClick={handleSignOutAllDevices}
           >
             Sign Out of All Devices
           </button>
         </div>
       </div>
 
-      {/* ── Section 4: Preferences (Domain-Specific Golf Units) ── */}
-      <div className="card">
-        <h3 style={{ fontSize: '1.2rem', fontWeight: 700, color: 'var(--color-text-primary)', marginBottom: '0.35rem' }}>
-          Golf & App Preferences
+      {/* ── Section 4: Preferences (Golf-Domain Specific) ── */}
+      <div className="card" style={{ padding: '1.75rem' }}>
+        <h3 style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--color-text-primary)', marginBottom: '0.35rem' }}>
+          Preferences
         </h3>
         <p style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)', marginBottom: '1.5rem' }}>
-          Customize your unit of measurement, display currency, and playing tee presets.
+          Configure golf distance units (Yards / Meters), display currency, language, and default tee.
         </p>
 
         <form onSubmit={handleSavePreferences}>
           <div className="grid grid-2" style={{ gap: '1rem', marginBottom: '1.5rem' }}>
             <div className="form-group">
-              <label className="form-label">Distance Unit</label>
+              <label className="form-label">Distance Unit (Golf Measurement)</label>
               <select
                 className="form-input"
                 value={preferences.distanceUnit}
                 onChange={(e) => setPreferences({ ...preferences, distanceUnit: e.target.value as 'Yards' | 'Meters' })}
               >
-                <option value="Yards">Yards (Standard)</option>
-                <option value="Meters">Meters (Metric)</option>
+                <option value="Yards">Yards (Standard Golf Course Measurement)</option>
+                <option value="Meters">Meters (Metric System)</option>
               </select>
             </div>
 
             <div className="form-group">
-              <label className="form-label">Display Currency</label>
+              <label className="form-label">Currency</label>
               <select
                 className="form-input"
                 value={preferences.currency}
                 onChange={(e) => setPreferences({ ...preferences, currency: e.target.value })}
               >
                 <option value="INR (₹)">INR (₹) — Indian Rupee</option>
-                <option value="USD ($)">USD ($) — US Dollar</option>
+                <option value="USD ($)">USD ($) — United States Dollar</option>
                 <option value="GBP (£)">GBP (£) — British Pound</option>
                 <option value="EUR (€)">EUR (€) — Euro</option>
               </select>
@@ -502,17 +657,30 @@ export default function SettingsPage() {
             </div>
 
             <div className="form-group">
-              <label className="form-label">Default Tee Preset</label>
+              <label className="form-label">Language</label>
+              <select
+                className="form-input"
+                value={preferences.language}
+                onChange={(e) => setPreferences({ ...preferences, language: e.target.value })}
+              >
+                <option value="English (US)">English (US)</option>
+                <option value="English (UK)">English (UK)</option>
+                <option value="Hindi">Hindi (हिंदी)</option>
+              </select>
+            </div>
+
+            <div className="form-group" style={{ gridColumn: 'span 2' }}>
+              <label className="form-label">Default Tee Preference</label>
               <select
                 className="form-input"
                 value={preferences.defaultTee}
                 onChange={(e) => setPreferences({ ...preferences, defaultTee: e.target.value })}
               >
-                <option value="White (Standard)">White (Standard)</option>
-                <option value="Blue (Championship)">Blue (Championship)</option>
-                <option value="Black (Tour)">Black (Tour)</option>
-                <option value="Gold (Senior)">Gold (Senior)</option>
-                <option value="Red (Forward)">Red (Forward)</option>
+                <option value="White (Standard)">White (Standard — Men’s / Middle Tees)</option>
+                <option value="Blue (Championship)">Blue (Championship Tees)</option>
+                <option value="Black (Tour)">Black (Tour / Professional Tees)</option>
+                <option value="Gold (Senior)">Gold (Senior Tees)</option>
+                <option value="Red (Forward)">Red (Forward / Ladies Tees)</option>
               </select>
             </div>
           </div>
@@ -524,12 +692,12 @@ export default function SettingsPage() {
       </div>
 
       {/* ── Section 5: Danger Zone ── */}
-      <div className="card" style={{ border: '1px solid rgba(255, 107, 107, 0.4)', background: 'rgba(255, 107, 107, 0.03)' }}>
-        <h3 style={{ fontSize: '1.2rem', fontWeight: 700, color: '#C94A4A', marginBottom: '0.35rem' }}>
+      <div className="card" style={{ padding: '1.75rem', border: '1.5px solid rgba(201, 74, 74, 0.4)', background: 'rgba(201, 74, 74, 0.03)' }}>
+        <h3 style={{ fontSize: '1.25rem', fontWeight: 700, color: '#C94A4A', marginBottom: '0.35rem' }}>
           Danger Zone
         </h3>
         <p style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)', marginBottom: '1.25rem' }}>
-          Irreversible account actions. Permanent deletion removes your handicap history, tracked scores, and active subscription.
+          Irreversible actions. Permanently removes your handicap records, 5-round score ledger, active subscription, and verified claims.
         </p>
 
         {!deleteConfirmOpen ? (
@@ -537,17 +705,17 @@ export default function SettingsPage() {
             type="button"
             className="btn btn-sm"
             onClick={() => setDeleteConfirmOpen(true)}
-            style={{ background: '#C94A4A', color: '#FFFFFF', border: 'none', fontWeight: 600 }}
+            style={{ background: '#C94A4A', color: '#FFFFFF', border: 'none', fontWeight: 600, padding: '0.55rem 1.25rem' }}
           >
             Delete Account...
           </button>
         ) : (
-          <div style={{ background: '#FFFFFF', border: '1px solid rgba(255, 107, 107, 0.3)', borderRadius: '8px', padding: '1.25rem', maxWidth: '480px' }}>
-            <p style={{ fontSize: '0.875rem', fontWeight: 600, color: '#C94A4A', margin: '0 0 8px 0' }}>
-              Are you absolutely sure?
+          <div style={{ background: '#FFFFFF', border: '1px solid rgba(201, 74, 74, 0.3)', borderRadius: '8px', padding: '1.25rem', maxWidth: '500px' }}>
+            <p style={{ fontSize: '0.9rem', fontWeight: 700, color: '#C94A4A', margin: '0 0 8px 0' }}>
+              Confirm Account Deletion
             </p>
-            <p style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', margin: '0 0 12px 0' }}>
-              Type <strong>DELETE</strong> in the box below to permanently remove your profile and score ledger:
+            <p style={{ fontSize: '0.825rem', color: 'var(--color-text-secondary)', margin: '0 0 12px 0' }}>
+              Type <strong>DELETE</strong> in the input below to confirm permanent removal of your account data:
             </p>
 
             <input
