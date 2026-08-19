@@ -30,9 +30,20 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (strictly ignore all secret env files, keep .env.example tracked)
+# ── Environment & Secrets ──
+# Strictly ignore all local and production environment secret files
 .env
-.env*
+.env.*
+.env*.local
+.env.local
+.env.development
+.env.development.local
+.env.test
+.env.test.local
+.env.production
+.env.production.local
+
+# Allow public example template only
 !.env.example
 
 # vercel
