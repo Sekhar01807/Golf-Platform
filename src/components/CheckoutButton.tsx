@@ -5,10 +5,11 @@ import { useState } from 'react';
 interface CheckoutButtonProps {
   plan: 'monthly' | 'yearly';
   className?: string;
+  style?: React.CSSProperties;
   children: React.ReactNode;
 }
 
-export default function CheckoutButton({ plan, className, children }: CheckoutButtonProps) {
+export default function CheckoutButton({ plan, className, style, children }: CheckoutButtonProps) {
   const [loading, setLoading] = useState(false);
 
   const handleCheckout = async () => {
@@ -39,7 +40,7 @@ export default function CheckoutButton({ plan, className, children }: CheckoutBu
       className={className} 
       onClick={handleCheckout} 
       disabled={loading}
-      style={{ opacity: loading ? 0.7 : 1, cursor: loading ? 'not-allowed' : 'pointer' }}
+      style={{ opacity: loading ? 0.7 : 1, cursor: loading ? 'not-allowed' : 'pointer', ...style }}
     >
       {loading ? 'Processing...' : children}
     </button>

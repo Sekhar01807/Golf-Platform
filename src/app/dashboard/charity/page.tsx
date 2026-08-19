@@ -53,7 +53,7 @@ export default function CharityPage() {
           .eq('user_id', user.id)
           .eq('payment_status', 'completed');
 
-        const total = (donations || []).reduce((sum, d) => sum + Number(d.amount), 0);
+        const total = (donations || []).reduce((sum: number, d: { amount: number | string }) => sum + Number(d.amount), 0);
         setTotalDonated(total);
       }
     } catch {
