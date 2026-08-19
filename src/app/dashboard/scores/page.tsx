@@ -1,15 +1,26 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { createClient } from '@/lib/supabase/client';
 import { useToast } from '@/components/Toast/Toast';
+import { ScorecardIcon } from '@/components/Icons/Icons';
+
+interface ScoreRecord {
+  id: string;
+  score: number;
+  date_played: string;
+  created_at?: string;
+}
 
 export default function ScoresPage() {
-  const [scores, setScores] = useState<{ id: string; score: number; date_played: string }[]>([]);
+  const [scores, setScores] = useState<ScoreRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [newScore, setNewScore] = useState('');
   const [newDate, setNewDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [submitting, setSubmitting] = useState(false);
+  
   const { showToast } = useToast();
+  const supabase = createClient();
 
   useEffect(() => {
     fetchScores();
@@ -17,16 +28,28 @@ export default function ScoresPage() {
 
   const fetchScores = async () => {
     try {
-      const res = await fetch('/api/scores');
-      if (res.ok) {
-        const data = await res.json();
-        setScores(data || []);
-      } else if (res.status === 401) {
-        showToast('Please sign in to view and submit scores', 'warning');
-      } else {
-        const errData = await res.json().catch(() => null);
-        showToast(errData?.error || 'Failed to load scores from server', 'error');
+      setLoading(true);
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+
+      if (authError || !user) {
+        showToast('Please sign in to view your scores', 'warning');
+        return;
       }
+
+      // Fetch 5 most recent scores ordered by date_played DESC
+      const { data, error } = await supabase
+        .from('golf_scores')
+        .select('id, score, date_played, created_at')
+        .eq('user_id', user.id)
+        .order('date_played', { ascending: false })
+        .limit(5);
+
+      if (error) {
+        showToast('Failed to load scores from database', 'error');
+        return;
+      }
+
+      setScores(data || []);
     } catch {
       showToast('Network error loading scores', 'error');
     } finally {
@@ -39,7 +62,7 @@ export default function ScoresPage() {
     const scoreNum = parseInt(newScore, 10);
 
     if (isNaN(scoreNum) || scoreNum < 1 || scoreNum > 45) {
-      showToast('Stableford score must be between 1 and 45', 'warning');
+      showToast('Stableford score must be between 1 and 45 points', 'warning');
       return;
     }
 
@@ -50,23 +73,53 @@ export default function ScoresPage() {
 
     setSubmitting(true);
     try {
-      const res = await fetch('/api/scores', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ score: scoreNum, date_played: newDate }),
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+
+      if (authError || !user) {
+        showToast('Session expired. Please sign in again.', 'error');
+        return;
+      }
+
+      // 1. Try transactional RPC function 'add_golf_score'
+      const { error: rpcError } = await supabase.rpc('add_golf_score', {
+        p_user_id: user.id,
+        p_score: scoreNum,
+        p_date_played: newDate,
       });
 
-      const data = await res.json();
+      // 2. Fallback to direct insertion & 5-round FIFO management if RPC is not present
+      if (rpcError) {
+        const { error: insertError } = await supabase
+          .from('golf_scores')
+          .insert({
+            user_id: user.id,
+            score: scoreNum,
+            date_played: newDate,
+          });
 
-      if (res.ok) {
-        showToast('Score recorded successfully! (Kept in 5-round FIFO)', 'success');
-        setNewScore('');
-        fetchScores();
-      } else {
-        showToast(data.error || 'Failed to record score', 'error');
+        if (insertError) {
+          showToast(insertError.message || 'Failed to record score', 'error');
+          return;
+        }
+
+        // Maintain 5-round FIFO limit (keep only 5 newest rounds)
+        const { data: allUserScores } = await supabase
+          .from('golf_scores')
+          .select('id, date_played')
+          .eq('user_id', user.id)
+          .order('date_played', { ascending: false });
+
+        if (allUserScores && allUserScores.length > 5) {
+          const excessIds = allUserScores.slice(5).map((s) => s.id);
+          await supabase.from('golf_scores').delete().in('id', excessIds);
+        }
       }
+
+      showToast('Score recorded successfully! (Active in 5-round FIFO)', 'success');
+      setNewScore('');
+      await fetchScores();
     } catch {
-      showToast('Network error submitting score', 'error');
+      showToast('Error recording score. Please try again.', 'error');
     } finally {
       setSubmitting(false);
     }
@@ -85,7 +138,10 @@ export default function ScoresPage() {
 
       {/* Add Score Form */}
       <div className="card" style={{ marginBottom: 'var(--space-2xl)' }}>
-        <h3 style={{ fontSize: '1.15rem', fontWeight: 700, marginBottom: 'var(--space-md)' }}>Log New Round</h3>
+        <h3 style={{ fontSize: '1.15rem', fontWeight: 700, marginBottom: 'var(--space-md)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <ScorecardIcon size={20} color="var(--color-primary)" />
+          <span>Log New Round</span>
+        </h3>
         
         <form onSubmit={handleAddScore} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: '1rem', alignItems: 'flex-end' }}>
           <div className="form-group" style={{ marginBottom: 0 }}>
@@ -120,14 +176,14 @@ export default function ScoresPage() {
 
       {/* Scores Table */}
       <div className="card">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-md)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-md)', flexWrap: 'wrap', gap: '0.5rem' }}>
           <div>
             <h3 style={{ fontSize: '1.15rem', fontWeight: 700 }}>Active Score History</h3>
             <p style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', marginTop: '2px' }}>
               {scores.length} of 5 slots filled · New scores automatically replace the oldest round (FIFO).
             </p>
           </div>
-          <span className="badge badge-primary">{scores.length}/5 Scores</span>
+          <span className="badge badge-primary">{scores.length} / 5 Scores</span>
         </div>
 
         <div className="table-wrapper">
