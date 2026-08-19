@@ -47,7 +47,7 @@ describe('Validation Suite: Score Submissions (Zod ScoreSchema)', () => {
   it('should reject future dates', () => {
     const futureDate = new Date();
     futureDate.setFullYear(futureDate.getFullYear() + 1);
-    const dateStr = futureDate.toISOString().split('T')[0];
+    const dateStr = `${futureDate.getFullYear()}-${String(futureDate.getMonth() + 1).padStart(2, '0')}-${String(futureDate.getDate()).padStart(2, '0')}`;
 
     const res = validateScoreInput({ score: 38, date_played: dateStr });
     expect(res.success).toBe(false);

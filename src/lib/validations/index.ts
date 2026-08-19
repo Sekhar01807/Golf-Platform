@@ -48,19 +48,18 @@ export const ScoreSchema = z
       )
       .refine(
         (val) => {
-          const parsed = new Date(val);
-          const today = new Date();
-          today.setHours(23, 59, 59, 999);
-          return parsed <= today;
+          const now = new Date();
+          const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+          return val <= todayStr;
         },
         { message: 'Date played cannot be in the future' }
       )
       .refine(
         (val) => {
-          const parsed = new Date(val);
           const minDate = new Date();
           minDate.setFullYear(minDate.getFullYear() - 2);
-          return parsed >= minDate;
+          const minDateStr = `${minDate.getFullYear()}-${String(minDate.getMonth() + 1).padStart(2, '0')}-${String(minDate.getDate()).padStart(2, '0')}`;
+          return val >= minDateStr;
         },
         { message: 'Date played cannot be older than 2 years' }
       ),
