@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
@@ -20,9 +20,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const pathname = usePathname();
   const router = useRouter();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [profilePopupOpen, setProfilePopupOpen] = useState(false);
   const [userName, setUserName] = useState('Golfer');
   const [userEmail, setUserEmail] = useState('');
   const [userInitial, setUserInitial] = useState('G');
+  const popupRef = useRef<HTMLDivElement>(null);
   const supabase = createClient();
 
   useEffect(() => {
@@ -50,6 +52,22 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     loadUserProfile();
   }, [supabase]);
 
+  // Click outside to close sidebar profile popup
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (popupRef.current && !popupRef.current.contains(event.target as Node)) {
+        setProfilePopupOpen(false);
+      }
+    }
+
+    if (profilePopupOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [profilePopupOpen]);
+
   const handleLogout = async () => {
     await supabase.auth.signOut();
     router.push('/');
@@ -64,6 +82,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     if (pathname === '/dashboard/draws') return { title: 'Monthly Skill Draws', desc: 'Inspect monthly winning number outcomes and prize pool distributions.' };
     if (pathname === '/dashboard/winnings') return { title: 'Prize Winnings & Verification', desc: 'Submit scorecard verification links and track your payout status.' };
     if (pathname === '/dashboard/subscription') return { title: 'Membership & Billing', desc: 'Manage your monthly or annual subscription tier via Stripe.' };
+    if (pathname === '/dashboard/profile') return { title: 'Golfer Profile', desc: 'View your golf handicap, performance statistics, and member credentials.' };
+    if (pathname === '/dashboard/settings') return { title: 'Account Settings', desc: 'Manage your preferences, security credentials, notification toggles, and system defaults.' };
     return { title: 'Member Portal', desc: 'Welcome back to your GolfForGood member portal.' };
   };
 
@@ -71,7 +91,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   return (
     <div className={styles.dashLayout}>
-      {/* ── Left Sidebar ── */}
+      {/* ── Left Sidebar (NovaCall Style) ── */}
       <aside className={`${styles.sidebar} ${sidebarOpen ? styles.open : ''}`}>
         {/* Brand Header */}
         <div className={styles.sidebarHeader}>
@@ -102,9 +122,16 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           })}
         </nav>
 
-        {/* User Profile Card (Bottom of Sidebar) */}
-        <div className={styles.sidebarFooter}>
-          <div className={styles.userProfileCard}>
+        {/* ── User Profile at Bottom of Sidebar (with Downward Dropdown Menu) ── */}
+        <div className={styles.sidebarFooter} ref={popupRef}>
+          {/* Profile Trigger Button */}
+          <button
+            type="button"
+            className={`${styles.userProfileTrigger} ${profilePopupOpen ? styles.open : ''}`}
+            onClick={() => setProfilePopupOpen(!profilePopupOpen)}
+            aria-expanded={profilePopupOpen}
+            aria-label="User profile options"
+          >
             <div className={styles.userAvatar}>
               {userInitial}
             </div>
@@ -112,25 +139,55 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               <div className={styles.userName} title={userName}>
                 {userName}
               </div>
-              <div className={styles.userRole} title={userEmail || 'Active Member'}>
-                {userEmail || 'Active Member'}
+              <div className={styles.userRole}>
+                Active Member
               </div>
             </div>
-            <button
-              onClick={handleLogout}
-              className={styles.signOutBtn}
-              title="Sign Out"
-              aria-label="Sign Out"
-            >
-              🚪
-            </button>
-          </div>
+            <span className={`${styles.sidebarChevron} ${profilePopupOpen ? styles.rotate : ''}`}>▼</span>
+          </button>
+
+          {/* Smooth Downward Popup (Profile, Settings & Logout) */}
+          {profilePopupOpen && (
+            <div className={styles.sidebarProfilePopup}>
+              <Link
+                href="/dashboard/profile"
+                className={styles.popupItem}
+                onClick={() => setProfilePopupOpen(false)}
+              >
+                <span>👤</span>
+                <span>My Profile</span>
+              </Link>
+
+              <Link
+                href="/dashboard/settings"
+                className={styles.popupItem}
+                onClick={() => setProfilePopupOpen(false)}
+              >
+                <span>⚙️</span>
+                <span>Account Settings</span>
+              </Link>
+
+              <div className={styles.popupDivider} />
+
+              <button
+                type="button"
+                className={`${styles.popupItem} ${styles.popupLogout}`}
+                onClick={() => {
+                  setProfilePopupOpen(false);
+                  handleLogout();
+                }}
+              >
+                <span>🚪</span>
+                <span>Log Out</span>
+              </button>
+            </div>
+          )}
         </div>
       </aside>
 
       {/* ── Main Dashboard Area ── */}
       <div className={styles.mainContainer}>
-        {/* Top Bar Header */}
+        {/* Top Bar Header (Clean layout with vivid Submit button) */}
         <header className={styles.topbar}>
           <div className={styles.topbarLeft}>
             <h1>{pageMeta.title}</h1>
@@ -141,12 +198,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             <Link href="/dashboard/scores" className={`${styles.topbarActionBtn} ${styles.topbarActionPrimary}`}>
               <span>+</span>
               <span>Submit Score</span>
-            </Link>
-            <Link href="/charities" className={`${styles.topbarActionBtn} ${styles.topbarActionSecondary}`}>
-              <span>🌿 Charities</span>
-            </Link>
-            <Link href="/" className={`${styles.topbarActionBtn} ${styles.topbarActionSecondary}`} title="View Public Website">
-              <span>Home ↗</span>
             </Link>
           </div>
         </header>
