@@ -97,7 +97,7 @@ describe('Regression 7: Future Score Rejection', () => {
   it('7. should reject score submissions with future dates', () => {
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
-    const dateStr = tomorrow.toISOString().split('T')[0];
+    const dateStr = `${tomorrow.getFullYear()}-${String(tomorrow.getMonth() + 1).padStart(2, '0')}-${String(tomorrow.getDate()).padStart(2, '0')}`;
 
     const validation = validateScoreInput({ score: 36, date_played: dateStr });
     expect(validation.success).toBe(false);

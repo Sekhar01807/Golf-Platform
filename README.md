@@ -6,7 +6,7 @@
 [![Zod](https://img.shields.io/badge/Zod-3.24.2-3068B7?style=flat-square&logo=zod&logoColor=white)](https://zod.dev/)
 [![Supabase](https://img.shields.io/badge/Supabase-PostgreSQL%20%2B%20RLS-3ECF8E?style=flat-square&logo=supabase&logoColor=white)](https://supabase.com/)
 [![Stripe](https://img.shields.io/badge/Stripe-Subscriptions%20%26%20Webhooks-635BFF?style=flat-square&logo=stripe&logoColor=white)](https://stripe.com/)
-[![Vitest](https://img.shields.io/badge/Vitest-94%20Automated%20Tests%20Passing-6E9F18?style=flat-square&logo=vitest&logoColor=white)](https://vitest.dev/)
+[![Vitest](https://img.shields.io/badge/Vitest-97%20Automated%20Tests%20Passing-6E9F18?style=flat-square&logo=vitest&logoColor=white)](https://vitest.dev/)
 
 > **A full-stack SaaS platform combining golf score tracking, verified charitable contributions, and simulated skill-based monthly prize draws.** Built with Next.js 16 (App Router), React 19, TypeScript, Zod Schema Validation, Supabase (PostgreSQL with RLS, triggers, and atomic RPCs), and Stripe Billing.
 
@@ -296,14 +296,14 @@ The system's financial and state transitions are verified across 5 critical stag
 
 ---
 
-## 🧪 Automated Test Suites (94 Tests)
+## 🧪 Automated Test Suites (97 Tests)
 
-The codebase includes 94 automated unit and regression tests written with **Vitest**:
+The codebase includes 97 automated unit and regression tests written with **Vitest**:
 
 - [`src/__tests__/security-regression.test.ts`](file:///src/__tests__/security-regression.test.ts) (27 tests): Verifies RLS invariants, FIFO limits, authorization barriers, and trigger guards.
-- [`src/__tests__/auth-security.test.ts`](file:///src/__tests__/auth-security.test.ts) (19 tests): Tests administrative privilege barriers, caller identity matching, and fail-closed configurations.
-- [`src/__tests__/validations.test.ts`](file:///src/__tests__/validations.test.ts) (18 tests): Validates Zod schema parsing and input helpers for scores, donations, checkout plans, and draw actions.
-- [`src/__tests__/draw.service.test.ts`](file:///src/__tests__/draw.service.test.ts) (10 tests): Tests winning number generation (CSPRNG & deterministic SHA-256), anti-inflation score matching, and integer prize pool distribution.
+- [`src/__tests__/validations.test.ts`](file:///src/__tests__/validations.test.ts) (24 tests): Validates Zod schema parsing and input helpers for scores, donations, checkout plans, and draw actions.
+- [`src/__tests__/auth-security.test.ts`](file:///src/__tests__/auth-security.test.ts) (13 tests): Tests administrative privilege barriers, caller identity matching, and fail-closed configurations.
+- [`src/__tests__/draw.service.test.ts`](file:///src/__tests__/draw.service.test.ts) (12 tests): Tests winning number generation (CSPRNG & deterministic SHA-256), anti-inflation score matching, and integer prize pool distribution.
 - [`src/__tests__/failure-path-recovery.test.ts`](file:///src/__tests__/failure-path-recovery.test.ts) (8 tests): Validates the 5-stage critical path (payment $\to$ duplicate prevention $\to$ webhook idempotency $\to$ prize accounting $\to$ payout failure recovery).
 - [`src/__tests__/webhook-idempotency.test.ts`](file:///src/__tests__/webhook-idempotency.test.ts) (8 tests): Tests stateful webhook transitions, in-flight isolation (300s), and retry safety.
 - [`src/__tests__/rate-limit.test.ts`](file:///src/__tests__/rate-limit.test.ts) (5 tests): Tests sliding-window bucket sliding, IP isolation, header formatting, and HTTP 429 throttling.

@@ -140,16 +140,16 @@ describe('Draw Engine: Mathematical Prize Pool Distribution', () => {
 
     const breakdown = calculatePrizePoolDistribution(totalPool, tierCounts);
 
-    expect(breakdown.tier5Match.individualPrize).toBe(13333);
-    expect(breakdown.tier4Match.individualPrize).toBe(11666);
-    expect(breakdown.tier3Match.individualPrize).toBe(8333);
+    expect(breakdown.tier5Match.individualPrize).toBe(13333.33);
+    expect(breakdown.tier4Match.individualPrize).toBe(11666.66);
+    expect(breakdown.tier3Match.individualPrize).toBe(8333.33);
 
-    const totalDistributed = (3 * 13333) + (3 * 11666) + (3 * 8333); // 39999 + 34998 + 24999 = 99996
+    const totalDistributed = Number(((3 * 13333.33) + (3 * 11666.66) + (3 * 8333.33)).toFixed(2)); // 39999.99 + 34999.98 + 24999.99 = 99999.96
     expect(breakdown.totalDistributed).toBe(totalDistributed);
-    expect(breakdown.rolloverAmount).toBe(4); // Residuals conserved: 100000 - 99996 = 4
+    expect(breakdown.rolloverAmount).toBe(0.04); // Residuals conserved: 100000 - 99999.96 = 0.04
 
     // Conservation invariant: Total Distributed + Rollover ALWAYS equals Total Prize Pool
-    expect(breakdown.totalDistributed + breakdown.rolloverAmount).toBe(totalPool);
+    expect(Number((breakdown.totalDistributed + breakdown.rolloverAmount).toFixed(2))).toBe(totalPool);
   });
 
   it('should maintain exact mathematical conservation without floating point precision drift', () => {
