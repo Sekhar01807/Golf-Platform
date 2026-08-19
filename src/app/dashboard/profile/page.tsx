@@ -10,7 +10,7 @@ interface GolfProfileData {
   phone: string;
   location: string;
   handicapIndex: string;
-  playingLevel: 'Beginner' | 'Intermediate' | 'Advanced';
+  playingLevel: string;
   preferredTee: string;
   homeCourse: string;
   favoriteCourse: string;
@@ -37,24 +37,24 @@ export default function ProfilePage() {
   const [subscriptionStatus, setSubscriptionStatus] = useState('inactive');
   const [subscriptionPlan, setSubscriptionPlan] = useState<string | null>(null);
 
-  // 2. Golf Profile (Domain-specific)
+  // 2. Golf Profile (Fresh/empty by default for new registrants)
   const [golfProfile, setGolfProfile] = useState<GolfProfileData>({
-    username: '@golfer',
-    phone: '+91 98765 43210',
-    location: 'Hyderabad, India',
-    handicapIndex: '12.4',
-    playingLevel: 'Intermediate',
-    preferredTee: 'White (Standard)',
-    homeCourse: 'Hyderabad Golf Club',
-    favoriteCourse: 'St Andrews (Old Course)',
-    yearsPlaying: '5 Years',
-    preferredFormat: 'Individual Stableford (18-Hole)',
-    averageScoreManual: '87',
+    username: '',
+    phone: '',
+    location: '',
+    handicapIndex: '',
+    playingLevel: '',
+    preferredTee: '',
+    homeCourse: '',
+    favoriteCourse: '',
+    yearsPlaying: '',
+    preferredFormat: '',
+    averageScoreManual: '',
   });
 
   // 3. Tracked Database Statistics
   const [scores, setScores] = useState<ScoreRecord[]>([]);
-  const [charityName, setCharityName] = useState<string>('World Wildlife Fund');
+  const [charityName, setCharityName] = useState<string>('');
   const [charityPercentage, setCharityPercentage] = useState<number>(10);
 
   const { showToast } = useToast();
@@ -74,9 +74,14 @@ export default function ProfilePage() {
         return;
       }
 
-      setEmail(user.email || '');
+      const emailAddress = user.email || '';
+      setEmail(emailAddress);
 
-      // Fetch user profile from database
+      // Auto-derive username from email prefix (e.g. sekharsekhar1919)
+      const emailPrefix = emailAddress.split('@')[0] || 'golfer';
+      const defaultUsername = `@${emailPrefix.toLowerCase().replace(/[^a-z0-9_]/g, '')}`;
+
+      // Fetch public.users profile
       const { data: profile } = await supabase
         .from('users')
         .select('full_name, subscription_status, subscription_plan, selected_charity_id, charity_contribution_percentage, created_at')
@@ -84,7 +89,7 @@ export default function ProfilePage() {
         .single();
 
       if (profile) {
-        const name = profile.full_name || user.user_metadata?.full_name || user.email?.split('@')[0] || 'Golfer';
+        const name = profile.full_name || user.user_metadata?.full_name || emailPrefix;
         setFullName(name);
         setSubscriptionStatus(profile.subscription_status || 'inactive');
         setSubscriptionPlan(profile.subscription_plan || null);
@@ -97,7 +102,7 @@ export default function ProfilePage() {
           }));
         }
 
-        // Fetch selected charity
+        // Fetch selected charity if set
         if (profile.selected_charity_id) {
           const { data: charity } = await supabase
             .from('charities')
@@ -106,20 +111,34 @@ export default function ProfilePage() {
             .single();
           if (charity) setCharityName(charity.name);
         }
+      } else {
+        setFullName(emailPrefix);
       }
 
-      // Load golf profile from metadata
+      // Load user metadata if filled by user, otherwise keep fresh
       if (user.user_metadata?.golf_profile) {
+        setGolfProfile({
+          username: user.user_metadata.golf_profile.username || defaultUsername,
+          phone: user.user_metadata.golf_profile.phone || user.user_metadata?.phone || '',
+          location: user.user_metadata.golf_profile.location || '',
+          handicapIndex: user.user_metadata.golf_profile.handicapIndex || '',
+          playingLevel: user.user_metadata.golf_profile.playingLevel || '',
+          preferredTee: user.user_metadata.golf_profile.preferredTee || '',
+          homeCourse: user.user_metadata.golf_profile.homeCourse || '',
+          favoriteCourse: user.user_metadata.golf_profile.favoriteCourse || '',
+          yearsPlaying: user.user_metadata.golf_profile.yearsPlaying || '',
+          preferredFormat: user.user_metadata.golf_profile.preferredFormat || '',
+          averageScoreManual: user.user_metadata.golf_profile.averageScoreManual || '',
+        });
+      } else {
         setGolfProfile((prev) => ({
           ...prev,
-          ...user.user_metadata.golf_profile,
+          username: defaultUsername,
+          phone: user.user_metadata?.phone || '',
         }));
-      } else {
-        const defaultHandle = `@${(profile?.full_name || user.email?.split('@')[0] || 'golfer').toLowerCase().replace(/[^a-z0-9]/g, '')}`;
-        setGolfProfile((prev) => ({ ...prev, username: defaultHandle }));
       }
 
-      // Fetch actual scores from database
+      // Fetch actual scores
       const { data: scoreRecords } = await supabase
         .from('golf_scores')
         .select('id, score, date_played')
@@ -143,7 +162,7 @@ export default function ProfilePage() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      // Update public.users
+      // Update database profile
       await supabase
         .from('users')
         .update({
@@ -152,15 +171,16 @@ export default function ProfilePage() {
         })
         .eq('id', user.id);
 
-      // Update auth user metadata
+      // Save user metadata
       await supabase.auth.updateUser({
         data: {
           full_name: fullName.trim(),
+          phone: golfProfile.phone.trim(),
           golf_profile: golfProfile,
         },
       });
 
-      showToast('Profile details updated successfully in database!', 'success');
+      showToast('Profile updated successfully!', 'success');
       setIsEditing(false);
     } catch {
       showToast('Failed to save profile changes', 'error');
@@ -169,9 +189,9 @@ export default function ProfilePage() {
     }
   };
 
-  // Compute stats from real tracked scores
+  // Stats computed from verified backend scores
   const roundsCount = scores.length;
-  const avgScore = roundsCount > 0 ? (scores.reduce((sum, s) => sum + s.score, 0) / roundsCount).toFixed(1) : golfProfile.averageScoreManual || '—';
+  const avgScore = roundsCount > 0 ? (scores.reduce((sum, s) => sum + s.score, 0) / roundsCount).toFixed(1) : (golfProfile.averageScoreManual || '—');
   const bestScore = roundsCount > 0 ? Math.max(...scores.map((s) => s.score)) : '—';
   const initial = (fullName.trim().charAt(0) || email.charAt(0) || 'G').toUpperCase();
 
@@ -216,22 +236,25 @@ export default function ProfilePage() {
                 <h2 style={{ fontSize: '1.6rem', fontWeight: 700, color: 'var(--color-text-primary)', margin: 0 }}>
                   {fullName}
                 </h2>
-                <span style={{ fontSize: '0.95rem', color: 'var(--color-primary)', fontWeight: 600 }}>
-                  {golfProfile.username}
-                </span>
+                {golfProfile.username && (
+                  <span style={{ fontSize: '0.95rem', color: 'var(--color-primary)', fontWeight: 600 }}>
+                    {golfProfile.username}
+                  </span>
+                )}
                 <span className={`badge ${subscriptionStatus === 'active' ? 'badge-active' : 'badge-inactive'}`}>
                   {subscriptionStatus === 'active' ? `Active ${subscriptionPlan || 'Member'}` : 'Member'}
                 </span>
               </div>
 
-              <div style={{ fontSize: '0.92rem', color: '#2D6846', fontWeight: 600, marginTop: '2px' }}>
-                {golfProfile.playingLevel} Golfer • Handicap {golfProfile.handicapIndex}
+              <div style={{ fontSize: '0.92rem', color: '#2D6846', fontWeight: 600, marginTop: '4px' }}>
+                {golfProfile.playingLevel ? `${golfProfile.playingLevel} Golfer` : 'Golfer'} 
+                {golfProfile.handicapIndex ? ` • Handicap ${golfProfile.handicapIndex}` : ''}
               </div>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem', marginTop: '0.5rem', flexWrap: 'wrap', fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>
                 <span>✉️ {email}</span>
-                {golfProfile.phone && <span>📞 {golfProfile.phone}</span>}
-                {golfProfile.location && <span>📍 {golfProfile.location}</span>}
+                {golfProfile.phone ? <span>📞 {golfProfile.phone}</span> : <span style={{ color: 'var(--color-text-muted)' }}>📞 Phone not added</span>}
+                {golfProfile.location ? <span>📍 {golfProfile.location}</span> : <span style={{ color: 'var(--color-text-muted)' }}>📍 Location not set</span>}
                 {createdAt && <span>🗓️ Member since {createdAt}</span>}
               </div>
             </div>
@@ -251,7 +274,7 @@ export default function ProfilePage() {
         {isEditing && (
           <form onSubmit={handleSaveProfile} style={{ marginTop: '1.75rem', paddingTop: '1.5rem', borderTop: '1px solid var(--color-border-subtle)' }}>
             <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: '1.25rem', color: 'var(--color-text-primary)' }}>
-              Edit Profile & Golf Attributes
+              Edit Golfer Profile Details
             </h3>
 
             <div className="grid grid-2" style={{ gap: '1rem', marginBottom: '1rem' }}>
@@ -262,6 +285,7 @@ export default function ProfilePage() {
                   className="form-input"
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
+                  placeholder="e.g. Sekhar Reddy"
                   required
                 />
               </div>
@@ -273,8 +297,7 @@ export default function ProfilePage() {
                   className="form-input"
                   value={golfProfile.username}
                   onChange={(e) => setGolfProfile({ ...golfProfile, username: e.target.value })}
-                  placeholder="@handle"
-                  required
+                  placeholder="e.g. @sekhar"
                 />
               </div>
 
@@ -285,7 +308,7 @@ export default function ProfilePage() {
                   className="form-input"
                   value={golfProfile.phone}
                   onChange={(e) => setGolfProfile({ ...golfProfile, phone: e.target.value })}
-                  placeholder="+91 98765 43210"
+                  placeholder="e.g. +91 98765 43210"
                 />
               </div>
 
@@ -316,8 +339,9 @@ export default function ProfilePage() {
                 <select
                   className="form-input"
                   value={golfProfile.playingLevel}
-                  onChange={(e) => setGolfProfile({ ...golfProfile, playingLevel: e.target.value as 'Beginner' | 'Intermediate' | 'Advanced' })}
+                  onChange={(e) => setGolfProfile({ ...golfProfile, playingLevel: e.target.value })}
                 >
+                  <option value="">Select Level...</option>
                   <option value="Beginner">Beginner (25+ Handicap)</option>
                   <option value="Intermediate">Intermediate (10–24 Handicap)</option>
                   <option value="Advanced">Advanced (Scratch–9 Handicap)</option>
@@ -331,11 +355,12 @@ export default function ProfilePage() {
                   value={golfProfile.preferredTee}
                   onChange={(e) => setGolfProfile({ ...golfProfile, preferredTee: e.target.value })}
                 >
-                  <option value="White (Standard)">White (Standard)</option>
-                  <option value="Blue (Championship)">Blue (Championship)</option>
-                  <option value="Black (Tour)">Black (Tour)</option>
-                  <option value="Gold (Senior)">Gold (Senior)</option>
-                  <option value="Red (Forward)">Red (Forward)</option>
+                  <option value="">Select Preferred Tee...</option>
+                  <option value="White (Standard)">White (Standard — Men’s / Middle Tees)</option>
+                  <option value="Blue (Championship)">Blue (Championship Tees)</option>
+                  <option value="Black (Tour)">Black (Tour / Pro Tees)</option>
+                  <option value="Gold (Senior)">Gold (Senior Tees)</option>
+                  <option value="Red (Forward)">Red (Forward / Ladies Tees)</option>
                 </select>
               </div>
 
@@ -368,7 +393,7 @@ export default function ProfilePage() {
                   className="form-input"
                   value={golfProfile.yearsPlaying}
                   onChange={(e) => setGolfProfile({ ...golfProfile, yearsPlaying: e.target.value })}
-                  placeholder="e.g. 5 Years"
+                  placeholder="e.g. 3 Years"
                 />
               </div>
 
@@ -379,6 +404,7 @@ export default function ProfilePage() {
                   value={golfProfile.preferredFormat}
                   onChange={(e) => setGolfProfile({ ...golfProfile, preferredFormat: e.target.value })}
                 >
+                  <option value="">Select Playing Format...</option>
                   <option value="Individual Stableford (18-Hole)">Individual Stableford (18-Hole)</option>
                   <option value="Individual Stroke Play (Gross/Net)">Individual Stroke Play (Gross/Net)</option>
                   <option value="Match Play">Match Play</option>
@@ -387,7 +413,7 @@ export default function ProfilePage() {
               </div>
 
               <div className="form-group">
-                <label className="form-label">Typical Average Score (18-Hole)</label>
+                <label className="form-label">Typical Average Score</label>
                 <input
                   type="text"
                   className="form-input"
@@ -400,7 +426,7 @@ export default function ProfilePage() {
 
             <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1.25rem' }}>
               <button type="submit" className="btn btn-primary btn-sm" disabled={saving}>
-                {saving ? 'Saving Changes...' : 'Save Profile Changes'}
+                {saving ? 'Saving...' : 'Save Profile Changes'}
               </button>
               <button type="button" className="btn btn-secondary btn-sm" onClick={() => setIsEditing(false)}>
                 Cancel
@@ -412,18 +438,30 @@ export default function ProfilePage() {
 
       {/* ── 2. Golf Profile (Domain-Specific Section) ── */}
       <div className="card" style={{ padding: '1.75rem' }}>
-        <h3 style={{ fontSize: '1.2rem', fontWeight: 700, color: 'var(--color-text-primary)', marginBottom: '1.25rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <span>⛳</span>
-          <span>Golf Profile</span>
-        </h3>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
+          <h3 style={{ fontSize: '1.2rem', fontWeight: 700, color: 'var(--color-text-primary)', margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <span>⛳</span>
+            <span>Golf Profile</span>
+          </h3>
+          {!isEditing && (
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={() => setIsEditing(true)}
+              style={{ fontSize: '0.8rem' }}
+            >
+              Edit Golf Details
+            </button>
+          )}
+        </div>
 
         <div className="grid grid-3" style={{ gap: '1rem' }}>
           <div style={{ padding: '1.1rem', background: 'var(--color-bg-surface)', borderRadius: '8px', border: '1px solid var(--color-border-subtle)' }}>
             <span style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-muted)', fontWeight: 600, display: 'block', marginBottom: '4px' }}>
               Handicap Index
             </span>
-            <span style={{ fontSize: '1.35rem', fontWeight: 700, color: 'var(--color-text-primary)' }}>
-              {golfProfile.handicapIndex}
+            <span style={{ fontSize: '1.25rem', fontWeight: 700, color: golfProfile.handicapIndex ? 'var(--color-text-primary)' : 'var(--color-text-muted)' }}>
+              {golfProfile.handicapIndex || 'Not set'}
             </span>
           </div>
 
@@ -431,8 +469,8 @@ export default function ProfilePage() {
             <span style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-muted)', fontWeight: 600, display: 'block', marginBottom: '4px' }}>
               Playing Level
             </span>
-            <span style={{ fontSize: '1.15rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>
-              {golfProfile.playingLevel}
+            <span style={{ fontSize: '1.05rem', fontWeight: 600, color: golfProfile.playingLevel ? 'var(--color-text-primary)' : 'var(--color-text-muted)' }}>
+              {golfProfile.playingLevel || 'Not set'}
             </span>
           </div>
 
@@ -440,8 +478,8 @@ export default function ProfilePage() {
             <span style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-muted)', fontWeight: 600, display: 'block', marginBottom: '4px' }}>
               Preferred Tee
             </span>
-            <span style={{ fontSize: '1.15rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>
-              {golfProfile.preferredTee}
+            <span style={{ fontSize: '1.05rem', fontWeight: 600, color: golfProfile.preferredTee ? 'var(--color-text-primary)' : 'var(--color-text-muted)' }}>
+              {golfProfile.preferredTee || 'Not set'}
             </span>
           </div>
 
@@ -449,8 +487,8 @@ export default function ProfilePage() {
             <span style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-muted)', fontWeight: 600, display: 'block', marginBottom: '4px' }}>
               Home Course
             </span>
-            <span style={{ fontSize: '1.05rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>
-              {golfProfile.homeCourse}
+            <span style={{ fontSize: '1.05rem', fontWeight: 600, color: golfProfile.homeCourse ? 'var(--color-text-primary)' : 'var(--color-text-muted)' }}>
+              {golfProfile.homeCourse || 'Not set'}
             </span>
           </div>
 
@@ -458,8 +496,8 @@ export default function ProfilePage() {
             <span style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-muted)', fontWeight: 600, display: 'block', marginBottom: '4px' }}>
               Favorite Course
             </span>
-            <span style={{ fontSize: '1.05rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>
-              {golfProfile.favoriteCourse}
+            <span style={{ fontSize: '1.05rem', fontWeight: 600, color: golfProfile.favoriteCourse ? 'var(--color-text-primary)' : 'var(--color-text-muted)' }}>
+              {golfProfile.favoriteCourse || 'Not set'}
             </span>
           </div>
 
@@ -467,8 +505,8 @@ export default function ProfilePage() {
             <span style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-muted)', fontWeight: 600, display: 'block', marginBottom: '4px' }}>
               Playing Experience
             </span>
-            <span style={{ fontSize: '1.05rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>
-              {golfProfile.yearsPlaying}
+            <span style={{ fontSize: '1.05rem', fontWeight: 600, color: golfProfile.yearsPlaying ? 'var(--color-text-primary)' : 'var(--color-text-muted)' }}>
+              {golfProfile.yearsPlaying || 'Not set'}
             </span>
           </div>
 
@@ -477,7 +515,7 @@ export default function ProfilePage() {
               Average Score
             </span>
             <span style={{ fontSize: '1.15rem', fontWeight: 600, color: '#2D6846' }}>
-              {avgScore} Pts
+              {avgScore !== '—' ? `${avgScore} Pts` : 'No rounds logged yet'}
             </span>
           </div>
 
@@ -485,8 +523,8 @@ export default function ProfilePage() {
             <span style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-muted)', fontWeight: 600, display: 'block', marginBottom: '4px' }}>
               Preferred Playing Format
             </span>
-            <span style={{ fontSize: '1.05rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>
-              {golfProfile.preferredFormat}
+            <span style={{ fontSize: '1.05rem', fontWeight: 600, color: golfProfile.preferredFormat ? 'var(--color-text-primary)' : 'var(--color-text-muted)' }}>
+              {golfProfile.preferredFormat || 'Not set'}
             </span>
           </div>
         </div>
@@ -527,7 +565,7 @@ export default function ProfilePage() {
           </div>
 
           <div className="stat-card" style={{ padding: '1.25rem' }}>
-            <div className="stat-value" style={{ fontSize: '1.8rem' }}>{golfProfile.handicapIndex}</div>
+            <div className="stat-value" style={{ fontSize: '1.8rem' }}>{golfProfile.handicapIndex || '—'}</div>
             <div className="stat-label">Current Handicap</div>
           </div>
         </div>
@@ -559,7 +597,7 @@ export default function ProfilePage() {
                   <span style={{ fontSize: '1.3rem' }}>🏌️</span>
                   <div>
                     <div style={{ fontWeight: 600, color: 'var(--color-text-primary)', fontSize: '0.92rem' }}>
-                      Round at {golfProfile.homeCourse}
+                      Logged 18-Hole Round {golfProfile.homeCourse ? `at ${golfProfile.homeCourse}` : ''}
                     </div>
                     <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
                       Played on {new Date(round.date_played).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
@@ -577,7 +615,7 @@ export default function ProfilePage() {
             </div>
           )}
 
-          {/* Tournament & Draw Participation Activity */}
+          {/* Monthly Draw Participation */}
           <div
             style={{
               display: 'flex',
@@ -596,7 +634,7 @@ export default function ProfilePage() {
                   Monthly Prize Draw Participation
                 </div>
                 <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
-                  Active entry linked to your verified 5-round score average
+                  {subscriptionStatus === 'active' ? 'Active entry linked to your verified 5-round score average' : 'Subscribe to enter monthly skill prize draws'}
                 </div>
               </div>
             </div>
@@ -624,12 +662,12 @@ export default function ProfilePage() {
                   Philanthropic Impact Allocation
                 </div>
                 <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
-                  Directing {charityPercentage}% of membership to {charityName}
+                  {charityName ? `Directing ${charityPercentage}% of membership to ${charityName}` : 'Select a verified charity partner'}
                 </div>
               </div>
             </div>
             <Link href="/dashboard/charity" style={{ fontSize: '0.825rem', color: 'var(--color-primary)', fontWeight: 600 }}>
-              Manage Charity →
+              {charityName ? 'Manage Charity →' : 'Choose Charity →'}
             </Link>
           </div>
         </div>
