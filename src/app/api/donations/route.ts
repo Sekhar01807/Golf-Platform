@@ -3,8 +3,12 @@ import { getStripe } from '@/lib/stripe';
 import { createClient } from '@/lib/supabase/server';
 import { validateDonationInput } from '@/lib/validations';
 import { getAppUrl } from '@/lib/env';
+import { enforceRateLimit } from '@/lib/rate-limit';
 
 export async function POST(request: NextRequest) {
+  const rateLimitRes = enforceRateLimit(request, { limit: 5, windowMs: 60000, keyPrefix: 'donations' });
+  if (rateLimitRes) return rateLimitRes;
+
   try {
     const supabase = await createClient();
     const {

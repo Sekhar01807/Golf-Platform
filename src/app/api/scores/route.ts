@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { validateScoreInput } from '@/lib/validations';
+import { enforceRateLimit } from '@/lib/rate-limit';
 
 export async function GET() {
   try {
@@ -33,6 +34,9 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  const rateLimitRes = enforceRateLimit(request, { limit: 10, windowMs: 60000, keyPrefix: 'scores' });
+  if (rateLimitRes) return rateLimitRes;
+
   try {
     const supabase = await createClient();
     const {

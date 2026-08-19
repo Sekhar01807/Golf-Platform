@@ -2,8 +2,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getStripe } from '@/lib/stripe';
 import { createClient } from '@/lib/supabase/server';
 import { getAppUrl } from '@/lib/env';
+import { enforceRateLimit } from '@/lib/rate-limit';
 
 export async function POST(request: NextRequest) {
+  const rateLimitRes = enforceRateLimit(request, { limit: 5, windowMs: 60000, keyPrefix: 'billing' });
+  if (rateLimitRes) return rateLimitRes;
+
   try {
     const stripe = getStripe();
     const supabase = await createClient();
