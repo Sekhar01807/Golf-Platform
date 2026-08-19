@@ -1,7 +1,4 @@
-import type { Metadata } from 'next';
-import Navbar from '@/components/Navbar/Navbar';
-import Footer from '@/components/Footer/Footer';
-import { ToastProvider } from '@/components/Toast/Toast';
+import AppLayoutWrapper from '@/components/Layout/AppLayoutWrapper';
 import './globals.css';
 
 export const dynamic = 'force-dynamic';
@@ -26,13 +23,9 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body>
-        <ToastProvider>
-          <Navbar />
-          <div style={{ paddingTop: '72px', minHeight: 'calc(100vh - 72px)' }}>
-            {children}
-          </div>
-          <Footer />
-        </ToastProvider>
+        <AppLayoutWrapper>
+          {children}
+        </AppLayoutWrapper>
       </body>
     </html>
   );

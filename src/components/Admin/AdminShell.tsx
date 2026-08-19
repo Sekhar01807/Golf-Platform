@@ -4,6 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
+import Logo from '@/components/Logo/Logo';
 import styles from '@/app/dashboard/dashboard.module.css';
 
 const adminNavItems = [
@@ -33,61 +34,104 @@ export default function AdminShell({
     router.refresh();
   };
 
+  const initial = adminEmail ? adminEmail.trim().charAt(0).toUpperCase() : 'A';
+  const displayEmail = adminEmail || 'admin@golfforgood.org';
+  const displayName = displayEmail.split('@')[0];
+
   return (
     <div className={styles.dashLayout}>
+      {/* ── Left Admin Sidebar ── */}
       <aside className={`${styles.sidebar} ${sidebarOpen ? styles.open : ''}`}>
+        {/* Brand Header */}
         <div className={styles.sidebarHeader}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '4px' }}>
-            <span style={{ fontSize: '1.25rem' }}>⚙️</span>
-            <h2 style={{ fontSize: '1.05rem', fontWeight: 700, color: 'var(--color-text-primary)' }}>Admin Control</h2>
-          </div>
-          <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>{adminEmail || 'Administrator'}</p>
+          <Link href="/admin" className={styles.brandLink}>
+            <Logo size={36} />
+            <span className={styles.brandTitle}>
+              Golf<span>Admin</span>
+            </span>
+          </Link>
         </div>
 
+        {/* Navigation */}
         <nav className={styles.sidebarNav}>
-          {adminNavItems.map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={`${styles.sidebarLink} ${pathname === item.href ? styles.active : ''}`}
-              onClick={() => setSidebarOpen(false)}
-            >
-              <span className={styles.sidebarIcon}>{item.icon}</span>
-              {item.label}
-            </Link>
-          ))}
+          <div className={styles.navSectionLabel}>Administration</div>
+          {adminNavItems.map((item) => {
+            const isActive = pathname === item.href;
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={`${styles.sidebarLink} ${isActive ? styles.active : ''}`}
+                onClick={() => setSidebarOpen(false)}
+              >
+                <span className={styles.sidebarIcon}>{item.icon}</span>
+                <span>{item.label}</span>
+              </Link>
+            );
+          })}
         </nav>
 
+        {/* User Profile Card (Bottom of Sidebar) */}
         <div className={styles.sidebarFooter}>
-          <Link
-            href="/dashboard"
-            className={styles.sidebarLink}
-            style={{ marginBottom: '4px' }}
-          >
-            <span className={styles.sidebarIcon}>🏠</span>
-            User Dashboard
-          </Link>
-          <button
-            onClick={handleLogout}
-            className={styles.sidebarLink}
-            style={{ width: '100%', border: 'none', background: 'none', cursor: 'pointer', color: 'var(--color-error)' }}
-          >
-            <span className={styles.sidebarIcon}>🚪</span>
-            Sign Out
-          </button>
+          <div className={styles.userProfileCard}>
+            <div className={styles.userAvatar} style={{ background: 'linear-gradient(135deg, #D4A84F 0%, #B88E39 100%)', color: '#18231C' }}>
+              {initial}
+            </div>
+            <div className={styles.userInfo}>
+              <div className={styles.userName} title={displayName}>
+                {displayName}
+              </div>
+              <div className={styles.userRole} style={{ color: '#E0BC6D' }} title="System Administrator">
+                Administrator
+              </div>
+            </div>
+            <button
+              onClick={handleLogout}
+              className={styles.signOutBtn}
+              title="Sign Out"
+              aria-label="Sign Out"
+            >
+              🚪
+            </button>
+          </div>
         </div>
       </aside>
 
-      <main className={styles.content}>
-        {children}
-      </main>
+      {/* ── Main Admin Area ── */}
+      <div className={styles.mainContainer}>
+        {/* Top Bar */}
+        <header className={styles.topbar}>
+          <div className={styles.topbarLeft}>
+            <h1>Admin Control Center</h1>
+            <p>System Administration, Draw Automation & Verified Ledger</p>
+          </div>
 
+          <div className={styles.topbarRight}>
+            <Link href="/admin/draws" className={`${styles.topbarActionBtn} ${styles.topbarActionPrimary}`}>
+              <span>🎰 Simulate Draw</span>
+            </Link>
+            <Link href="/dashboard" className={`${styles.topbarActionBtn} ${styles.topbarActionSecondary}`}>
+              <span>Member Portal ↗</span>
+            </Link>
+            <Link href="/" className={`${styles.topbarActionBtn} ${styles.topbarActionSecondary}`} title="View Public Website">
+              <span>Home ↗</span>
+            </Link>
+          </div>
+        </header>
+
+        {/* Content */}
+        <main className={styles.content}>
+          {children}
+        </main>
+      </div>
+
+      {/* Mobile Toggle */}
       <button
         className={styles.mobileToggle}
         onClick={() => setSidebarOpen(!sidebarOpen)}
-        aria-label="Toggle sidebar"
+        aria-label="Toggle admin sidebar"
       >
-        ☰
+        {sidebarOpen ? '✕' : '☰'}
       </button>
     </div>
   );
