@@ -1,6 +1,10 @@
+import { z } from 'zod';
+
 /**
- * Comprehensive Validation Schemas & Pure TypeScript Validation Helpers
- * Validates scores, plans, donations, and administrative requests.
+ * ══════════════════════════════════════════════════════════════════════════════
+ * Comprehensive Zod Validation Schemas & Type Inferences
+ * Validates scores, plans, donations, charities, proof URLs, and draw actions.
+ * ══════════════════════════════════════════════════════════════════════════════
  */
 
 export interface ValidationResult<T> {
@@ -9,285 +13,280 @@ export interface ValidationResult<T> {
   error?: string;
 }
 
-// ── Score Validation ──
-export interface ScoreInput {
-  score: number;
-  date_played: string;
-}
-
-export function validateScoreInput(input: unknown): ValidationResult<ScoreInput> {
-  if (!input || typeof input !== 'object') {
-    return { success: false, error: 'Invalid payload: JSON object expected' };
-  }
-
-  const { score, date_played } = input as Record<string, unknown>;
-
-  const scoreNum = typeof score === 'string' ? Number(score) : score;
-  if (typeof scoreNum !== 'number' || !Number.isInteger(scoreNum) || Number.isNaN(scoreNum)) {
-    return { success: false, error: 'Score must be a valid integer' };
-  }
-
-  if (scoreNum < 1 || scoreNum > 45) {
-    return { success: false, error: 'Stableford score must be between 1 and 45' };
-  }
-
-  if (typeof date_played !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date_played)) {
-    return { success: false, error: 'Date played must be in YYYY-MM-DD format' };
-  }
-
-  const parsedDate = new Date(date_played);
-  if (Number.isNaN(parsedDate.getTime())) {
-    return { success: false, error: 'Invalid date provided' };
-  }
-
-  const today = new Date();
-  today.setHours(23, 59, 59, 999);
-  if (parsedDate > today) {
-    return { success: false, error: 'Date played cannot be in the future' };
-  }
-
-  const minDate = new Date();
-  minDate.setFullYear(minDate.getFullYear() - 2);
-  if (parsedDate < minDate) {
-    return { success: false, error: 'Date played cannot be older than 2 years' };
-  }
-
-  return {
-    success: true,
-    data: {
-      score: scoreNum,
-      date_played,
-    },
-  };
-}
-
-// ── Checkout Plan Validation ──
-export interface CheckoutInput {
-  plan: 'monthly' | 'yearly';
-}
-
-export function validateCheckoutInput(input: unknown): ValidationResult<CheckoutInput> {
-  if (!input || typeof input !== 'object') {
-    return { success: false, error: 'Invalid payload: JSON object expected' };
-  }
-
-  const { plan } = input as Record<string, unknown>;
-
-  if (plan !== 'monthly' && plan !== 'yearly') {
-    return { success: false, error: 'Subscription plan must be either "monthly" or "yearly"' };
-  }
-
-  return {
-    success: true,
-    data: { plan },
-  };
-}
-
-// ── Donation Validation ──
-export interface DonationInput {
-  charity_id: string;
-  amount: number;
-}
-
-export function validateDonationInput(input: unknown): ValidationResult<DonationInput> {
-  if (!input || typeof input !== 'object') {
-    return { success: false, error: 'Invalid payload: JSON object expected' };
-  }
-
-  const { charity_id, amount } = input as Record<string, unknown>;
-
-  if (typeof charity_id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(charity_id)) {
-    return { success: false, error: 'A valid charity UUID is required' };
-  }
-
-  const amountNum = typeof amount === 'string' ? Number(amount) : amount;
-  if (typeof amountNum !== 'number' || Number.isNaN(amountNum) || amountNum < 10) {
-    return { success: false, error: 'Donation amount must be at least ₹10' };
-  }
-
-  if (amountNum > 1000000) {
-    return { success: false, error: 'Donation amount exceeds maximum allowed limit' };
-  }
-
-  return {
-    success: true,
-    data: {
-      charity_id,
-      amount: Math.round(amountNum),
-    },
-  };
-}
-
-// ── Charity Input Validation ──
-export interface CharityInput {
-  name: string;
-  description: string;
-  is_featured?: boolean;
-  upcoming_events?: string | null;
-}
-
-export function validateCharityInput(input: unknown): ValidationResult<CharityInput> {
-  if (!input || typeof input !== 'object') {
-    return { success: false, error: 'Invalid payload: JSON object expected' };
-  }
-
-  const { name, description, is_featured, upcoming_events } = input as Record<string, unknown>;
-
-  if (typeof name !== 'string' || name.trim().length < 2 || name.trim().length > 100) {
-    return { success: false, error: 'Charity name must be between 2 and 100 characters' };
-  }
-
-  if (typeof description !== 'string' || description.trim().length < 10) {
-    return { success: false, error: 'Charity description must be at least 10 characters' };
-  }
-
-  return {
-    success: true,
-    data: {
-      name: name.trim(),
-      description: description.trim(),
-      is_featured: Boolean(is_featured),
-      upcoming_events: typeof upcoming_events === 'string' ? upcoming_events.trim() : null,
-    },
-  };
-}
-
-// ── Winner Verification / Payout Validation ──
-export interface WinnerStatusUpdateInput {
-  verification_status?: 'approved' | 'rejected' | 'pending';
-  payout_status?: 'pending' | 'paid';
-}
+// ── UUID Helper & Schema ──
+export const UuidSchema = z
+  .string()
+  .regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, {
+    message: 'A valid UUID is required',
+  });
 
 export function isValidUuid(id: unknown): boolean {
   if (typeof id !== 'string') return false;
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+  return UuidSchema.safeParse(id).success;
 }
+
+// ── Score Validation ──
+export const ScoreSchema = z
+  .object({
+    score: z.preprocess(
+      (val) => (typeof val === 'string' ? Number(val) : val),
+      z
+        .number({ invalid_type_error: 'Score must be a valid integer' })
+        .int({ message: 'Score must be a valid integer' })
+        .min(1, { message: 'Stableford score must be between 1 and 45' })
+        .max(45, { message: 'Stableford score must be between 1 and 45' })
+    ),
+    date_played: z
+      .string({ invalid_type_error: 'Date played must be in YYYY-MM-DD format' })
+      .regex(/^\d{4}-\d{2}-\d{2}$/, { message: 'Date played must be in YYYY-MM-DD format' })
+      .refine(
+        (val) => {
+          const parsed = new Date(val);
+          return !Number.isNaN(parsed.getTime());
+        },
+        { message: 'Invalid date provided' }
+      )
+      .refine(
+        (val) => {
+          const parsed = new Date(val);
+          const today = new Date();
+          today.setHours(23, 59, 59, 999);
+          return parsed <= today;
+        },
+        { message: 'Date played cannot be in the future' }
+      )
+      .refine(
+        (val) => {
+          const parsed = new Date(val);
+          const minDate = new Date();
+          minDate.setFullYear(minDate.getFullYear() - 2);
+          return parsed >= minDate;
+        },
+        { message: 'Date played cannot be older than 2 years' }
+      ),
+  });
+
+export type ScoreInput = z.infer<typeof ScoreSchema>;
+
+export function validateScoreInput(input: unknown): ValidationResult<ScoreInput> {
+  const result = ScoreSchema.safeParse(input);
+  if (!result.success) {
+    return { success: false, error: result.error.errors[0]?.message || 'Invalid score input' };
+  }
+  return { success: true, data: result.data };
+}
+
+// ── Checkout Plan Validation ──
+export const CheckoutSchema = z.object({
+  plan: z.enum(['monthly', 'yearly'], {
+    errorMap: () => ({ message: 'Subscription plan must be either "monthly" or "yearly"' }),
+  }),
+});
+
+export type CheckoutInput = z.infer<typeof CheckoutSchema>;
+
+export function validateCheckoutInput(input: unknown): ValidationResult<CheckoutInput> {
+  const result = CheckoutSchema.safeParse(input);
+  if (!result.success) {
+    return { success: false, error: result.error.errors[0]?.message || 'Invalid checkout payload' };
+  }
+  return { success: true, data: result.data };
+}
+
+// ── Donation Validation ──
+export const DonationSchema = z.object({
+  charity_id: UuidSchema.refine((val) => val.length > 0, { message: 'A valid charity UUID is required' }),
+  amount: z.preprocess(
+    (val) => (typeof val === 'string' ? Number(val) : val),
+    z
+      .number({ invalid_type_error: 'Donation amount must be a valid number' })
+      .min(10, { message: 'Donation amount must be at least ₹10' })
+      .max(1000000, { message: 'Donation amount exceeds maximum allowed limit' })
+      .transform(Math.round)
+  ),
+});
+
+export type DonationInput = z.infer<typeof DonationSchema>;
+
+export function validateDonationInput(input: unknown): ValidationResult<DonationInput> {
+  const result = DonationSchema.safeParse(input);
+  if (!result.success) {
+    return { success: false, error: result.error.errors[0]?.message || 'Invalid donation payload' };
+  }
+  return { success: true, data: result.data };
+}
+
+// ── Charity Input Validation ──
+export const CharitySchema = z.object({
+  name: z
+    .string({ invalid_type_error: 'Charity name must be a string' })
+    .transform((s) => s.trim())
+    .refine((s) => s.length >= 2 && s.length <= 100, {
+      message: 'Charity name must be between 2 and 100 characters',
+    }),
+  description: z
+    .string({ invalid_type_error: 'Charity description must be a string' })
+    .transform((s) => s.trim())
+    .refine((s) => s.length >= 10, {
+      message: 'Charity description must be at least 10 characters',
+    }),
+  is_featured: z.boolean().optional().default(false),
+  upcoming_events: z
+    .string()
+    .nullable()
+    .optional()
+    .transform((s) => (s ? s.trim() : null)),
+});
+
+export type CharityInput = z.infer<typeof CharitySchema>;
+
+export function validateCharityInput(input: unknown): ValidationResult<CharityInput> {
+  const result = CharitySchema.safeParse(input);
+  if (!result.success) {
+    return { success: false, error: result.error.errors[0]?.message || 'Invalid charity payload' };
+  }
+  return { success: true, data: result.data };
+}
+
+// ── Scorecard Proof URL Validation ──
+export const ProofUrlSchema = z
+  .string({ invalid_type_error: 'A scorecard proof URL is required' })
+  .transform((s) => s.trim())
+  .refine((s) => s.length > 0, { message: 'A scorecard proof URL is required' })
+  .refine((s) => s.length <= 500, {
+    message: 'Proof URL exceeds maximum allowed length of 500 characters',
+  })
+  .refine(
+    (url) => {
+      try {
+        const parsed = new URL(url);
+        return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+      } catch {
+        return false;
+      }
+    },
+    { message: 'Proof URL must use HTTP or HTTPS protocol' }
+  );
 
 export function validateProofUrl(url: unknown): ValidationResult<string> {
-  if (typeof url !== 'string' || url.trim().length === 0) {
-    return { success: false, error: 'A scorecard proof URL is required' };
+  const result = ProofUrlSchema.safeParse(url);
+  if (!result.success) {
+    return { success: false, error: result.error.errors[0]?.message || 'Invalid proof URL provided' };
   }
-
-  const trimmed = url.trim();
-  if (trimmed.length > 500) {
-    return { success: false, error: 'Proof URL exceeds maximum allowed length of 500 characters' };
-  }
-
-  try {
-    const parsed = new URL(trimmed);
-    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-      return { success: false, error: 'Proof URL must use HTTP or HTTPS protocol' };
-    }
-  } catch {
-    return { success: false, error: 'Proof URL must be a valid, well-formed web URL' };
-  }
-
-  return { success: true, data: trimmed };
+  return { success: true, data: result.data };
 }
 
+// ── Winner Verification / Payout Validation ──
+export const WinnerStatusUpdateSchema = z
+  .object({
+    verification_status: z.enum(['approved', 'rejected', 'pending'], {
+      errorMap: () => ({ message: 'Invalid verification status' }),
+    }).optional(),
+    payout_status: z.enum(['pending', 'paid'], {
+      errorMap: () => ({ message: 'Invalid payout status' }),
+    }).optional(),
+  })
+  .refine((data) => data.verification_status !== undefined || data.payout_status !== undefined, {
+    message: 'Must provide either verification_status or payout_status',
+  });
+
+export type WinnerStatusUpdateInput = z.infer<typeof WinnerStatusUpdateSchema>;
+
 export function validateWinnerUpdateInput(input: unknown): ValidationResult<WinnerStatusUpdateInput> {
-  if (!input || typeof input !== 'object') {
-    return { success: false, error: 'Invalid payload: JSON object expected' };
+  const result = WinnerStatusUpdateSchema.safeParse(input);
+  if (!result.success) {
+    return { success: false, error: result.error.errors[0]?.message || 'Invalid winner update payload' };
   }
-
-  const { verification_status, payout_status } = input as Record<string, unknown>;
-
-  if (verification_status && !['approved', 'rejected', 'pending'].includes(verification_status as string)) {
-    return { success: false, error: 'Invalid verification status' };
-  }
-
-  if (payout_status && !['pending', 'paid'].includes(payout_status as string)) {
-    return { success: false, error: 'Invalid payout status' };
-  }
-
-  if (!verification_status && !payout_status) {
-    return { success: false, error: 'Must provide either verification_status or payout_status' };
-  }
-
-  return {
-    success: true,
-    data: {
-      verification_status: verification_status as WinnerStatusUpdateInput['verification_status'],
-      payout_status: payout_status as WinnerStatusUpdateInput['payout_status'],
-    },
-  };
+  return { success: true, data: result.data };
 }
 
 // ── Admin Draw Action Validation ──
-export interface DrawActionInput {
-  action: 'simulate' | 'publish' | 'lock';
-  drawMonth?: string;
-  drawLogic?: 'random' | 'algorithmic';
-  drawId?: string;
-  forceRegenerate?: boolean;
-  entropySeed?: string;
-}
+export const DrawActionSchema = z
+  .object({
+    action: z.enum(['simulate', 'publish', 'lock'], {
+      errorMap: () => ({ message: 'Invalid action: Must be "simulate", "publish", or "lock"' }),
+    }),
+    drawMonth: z.string().optional(),
+    drawLogic: z.enum(['random', 'algorithmic'], {
+      errorMap: () => ({ message: 'drawLogic must be either "random" or "algorithmic"' }),
+    }).optional(),
+    drawId: z.string().optional(),
+    forceRegenerate: z.boolean().optional(),
+    entropySeed: z.string().optional(),
+  })
+  .superRefine((data, ctx) => {
+    if (data.action === 'simulate') {
+      let monthStr = data.drawMonth;
+      if (!monthStr) {
+        monthStr = new Date().toISOString().slice(0, 7) + '-01';
+      }
+
+      if (/^\d{4}-\d{2}$/.test(monthStr)) {
+        monthStr = `${monthStr}-01`;
+      }
+
+      if (!/^\d{4}-\d{2}-01$/.test(monthStr)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'drawMonth must be in YYYY-MM-01 format',
+          path: ['drawMonth'],
+        });
+        return;
+      }
+
+      const parsed = new Date(monthStr);
+      if (Number.isNaN(parsed.getTime())) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Invalid drawMonth date provided',
+          path: ['drawMonth'],
+        });
+        return;
+      }
+    }
+
+    if (data.action === 'publish' || data.action === 'lock') {
+      if (!data.drawId || !isValidUuid(data.drawId)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `A valid drawId UUID is required to ${data.action} a draw`,
+          path: ['drawId'],
+        });
+      }
+    }
+  });
+
+export type DrawActionInput = z.infer<typeof DrawActionSchema>;
 
 export function validateDrawActionInput(input: unknown): ValidationResult<DrawActionInput> {
-  if (!input || typeof input !== 'object') {
-    return { success: false, error: 'Invalid payload: JSON object expected' };
+  const result = DrawActionSchema.safeParse(input);
+  if (!result.success) {
+    return { success: false, error: result.error.errors[0]?.message || 'Invalid draw action payload' };
   }
 
-  const { action, drawMonth, drawLogic, drawId, forceRegenerate, entropySeed } = input as Record<string, unknown>;
-
-  if (!action || (action !== 'simulate' && action !== 'publish' && action !== 'lock')) {
-    return { success: false, error: 'Invalid action: Must be "simulate", "publish", or "lock"' };
-  }
-
-  if (action === 'simulate') {
-    let monthStr = drawMonth;
-    if (!monthStr) {
-      monthStr = new Date().toISOString().slice(0, 7) + '-01';
-    }
-
-    if (typeof monthStr !== 'string') {
-      return { success: false, error: 'drawMonth must be a string formatted as YYYY-MM-DD or YYYY-MM' };
-    }
-
-    // Support YYYY-MM or YYYY-MM-01 format
+  const data = result.data;
+  if (data.action === 'simulate') {
+    let monthStr = data.drawMonth || new Date().toISOString().slice(0, 7) + '-01';
     if (/^\d{4}-\d{2}$/.test(monthStr)) {
       monthStr = `${monthStr}-01`;
     }
-
-    if (!/^\d{4}-\d{2}-01$/.test(monthStr)) {
-      return { success: false, error: 'drawMonth must be in YYYY-MM-01 format' };
-    }
-
-    const parsed = new Date(monthStr);
-    if (Number.isNaN(parsed.getTime())) {
-      return { success: false, error: 'Invalid drawMonth date provided' };
-    }
-
-    const logic = drawLogic || 'random';
-    if (logic !== 'random' && logic !== 'algorithmic') {
-      return { success: false, error: 'drawLogic must be either "random" or "algorithmic"' };
-    }
-
     return {
       success: true,
       data: {
         action: 'simulate',
         drawMonth: monthStr,
-        drawLogic: logic,
-        forceRegenerate: Boolean(forceRegenerate),
-        entropySeed: typeof entropySeed === 'string' && entropySeed.trim().length > 0 ? entropySeed.trim() : undefined,
+        drawLogic: data.drawLogic || 'random',
+        forceRegenerate: Boolean(data.forceRegenerate),
+        entropySeed: data.entropySeed?.trim() || undefined,
       },
     };
   }
 
-  if (action === 'publish' || action === 'lock') {
-    if (!drawId || typeof drawId !== 'string' || !isValidUuid(drawId)) {
-      return { success: false, error: `A valid drawId UUID is required to ${action} a draw` };
-    }
-
-    return {
-      success: true,
-      data: {
-        action,
-        drawId,
-      },
-    };
-  }
-
-  return { success: false, error: 'Unsupported draw action' };
+  return {
+    success: true,
+    data: {
+      action: data.action,
+      drawId: data.drawId,
+    },
+  };
 }

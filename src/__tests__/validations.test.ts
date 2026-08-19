@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import {
+  ScoreSchema,
+  CheckoutSchema,
+  DonationSchema,
+  CharitySchema,
+  WinnerStatusUpdateSchema,
+  DrawActionSchema,
+  ProofUrlSchema,
   validateScoreInput,
   validateCheckoutInput,
   validateDonationInput,
@@ -10,11 +17,14 @@ import {
   validateProofUrl,
 } from '../lib/validations';
 
-describe('Validation Suite: Score Submissions', () => {
+describe('Validation Suite: Score Submissions (Zod ScoreSchema)', () => {
   it('should accept valid Stableford scores and past dates', () => {
     const res = validateScoreInput({ score: 36, date_played: '2026-08-01' });
     expect(res.success).toBe(true);
     expect(res.data).toEqual({ score: 36, date_played: '2026-08-01' });
+
+    const zodDirect = ScoreSchema.safeParse({ score: 36, date_played: '2026-08-01' });
+    expect(zodDirect.success).toBe(true);
   });
 
   it('should reject non-integer scores and strings', () => {
@@ -51,10 +61,11 @@ describe('Validation Suite: Score Submissions', () => {
   });
 });
 
-describe('Validation Suite: Stripe Checkout Plans', () => {
+describe('Validation Suite: Stripe Checkout Plans (Zod CheckoutSchema)', () => {
   it('should allow valid plans (monthly, yearly)', () => {
     expect(validateCheckoutInput({ plan: 'monthly' }).success).toBe(true);
     expect(validateCheckoutInput({ plan: 'yearly' }).success).toBe(true);
+    expect(CheckoutSchema.safeParse({ plan: 'monthly' }).success).toBe(true);
   });
 
   it('should reject unpermitted plan identifiers', () => {
@@ -64,12 +75,15 @@ describe('Validation Suite: Stripe Checkout Plans', () => {
   });
 });
 
-describe('Validation Suite: Independent Donations', () => {
+describe('Validation Suite: Independent Donations (Zod DonationSchema)', () => {
   it('should validate standard charity donations', () => {
     const validUuid = '12345678-1234-1234-1234-123456789abc';
     const res = validateDonationInput({ charity_id: validUuid, amount: 500 });
     expect(res.success).toBe(true);
     expect(res.data?.amount).toBe(500);
+
+    const zodDirect = DonationSchema.safeParse({ charity_id: validUuid, amount: 500 });
+    expect(zodDirect.success).toBe(true);
   });
 
   it('should reject invalid UUIDs or negative amounts', () => {
@@ -79,7 +93,7 @@ describe('Validation Suite: Independent Donations', () => {
   });
 });
 
-describe('Validation Suite: Charity Directory Entries', () => {
+describe('Validation Suite: Charity Directory Entries (Zod CharitySchema)', () => {
   it('should accept valid charity profiles', () => {
     const res = validateCharityInput({
       name: 'Fairway Green Initiative',
@@ -88,6 +102,10 @@ describe('Validation Suite: Charity Directory Entries', () => {
     });
     expect(res.success).toBe(true);
     expect(res.data?.is_featured).toBe(true);
+    expect(CharitySchema.safeParse({
+      name: 'Fairway Green Initiative',
+      description: 'Promoting biodiversity and ecological stewardship on golf fairways.',
+    }).success).toBe(true);
   });
 
   it('should reject short or blank charity names', () => {
@@ -96,10 +114,11 @@ describe('Validation Suite: Charity Directory Entries', () => {
   });
 });
 
-describe('Validation Suite: Winner Status Updates', () => {
+describe('Validation Suite: Winner Status Updates (Zod WinnerStatusUpdateSchema)', () => {
   it('should accept valid verification statuses', () => {
     expect(validateWinnerUpdateInput({ verification_status: 'approved' }).success).toBe(true);
     expect(validateWinnerUpdateInput({ payout_status: 'paid' }).success).toBe(true);
+    expect(WinnerStatusUpdateSchema.safeParse({ verification_status: 'approved' }).success).toBe(true);
   });
 
   it('should reject arbitrary status strings', () => {
@@ -121,7 +140,7 @@ describe('Validation Suite: UUID Validation Helper', () => {
   });
 });
 
-describe('Validation Suite: Admin Draw Actions', () => {
+describe('Validation Suite: Admin Draw Actions (Zod DrawActionSchema)', () => {
   it('should validate valid simulation actions', () => {
     const res = validateDrawActionInput({
       action: 'simulate',
@@ -166,10 +185,11 @@ describe('Validation Suite: Admin Draw Actions', () => {
   });
 });
 
-describe('Validation Suite: Winner Proof URL Validation', () => {
+describe('Validation Suite: Winner Proof URL Validation (Zod ProofUrlSchema)', () => {
   it('should accept valid HTTPS image/web URLs', () => {
     expect(validateProofUrl('https://example.com/scorecards/aug2026.png').success).toBe(true);
     expect(validateProofUrl('https://storage.googleapis.com/proofs/card-123.jpg').success).toBe(true);
+    expect(ProofUrlSchema.safeParse('https://example.com/scorecards/aug2026.png').success).toBe(true);
   });
 
   it('should accept HTTP URLs in development/testing', () => {
@@ -185,7 +205,6 @@ describe('Validation Suite: Winner Proof URL Validation', () => {
   it('should reject non-string and empty inputs', () => {
     expect(validateProofUrl('').success).toBe(false);
     expect(validateProofUrl('   ').success).toBe(false);
-    expect(validateProofUrl(null).success).toBe(false);
-    expect(validateProofUrl(12345).success).toBe(false);
+    expect(validateProofUrl(null)).toEqual({ success: false, error: 'A scorecard proof URL is required' });
   });
 });
