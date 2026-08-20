@@ -1,26 +1,89 @@
 -- ═══════════════════════════════════════════════════
 -- Golf Charity Subscription Platform
--- Supabase Database Schema (Hardened Production Schema)
+-- Supabase Database Schema (Idempotent Production Schema)
 -- ═══════════════════════════════════════════════════
 
 -- Enable UUID extension
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
--- ── Custom Types ──
-CREATE TYPE user_role AS ENUM ('user', 'admin');
-CREATE TYPE subscription_status AS ENUM ('active', 'inactive', 'cancelled', 'lapsed');
-CREATE TYPE subscription_plan AS ENUM ('monthly', 'yearly');
-CREATE TYPE draw_status AS ENUM ('simulated', 'published', 'locked');
-CREATE TYPE draw_type AS ENUM ('random', 'algorithmic');
-CREATE TYPE verification_status AS ENUM ('pending', 'approved', 'rejected');
-CREATE TYPE payout_status AS ENUM ('pending', 'paid');
-CREATE TYPE payment_status AS ENUM ('pending', 'completed');
-CREATE TYPE stripe_event_status AS ENUM ('processing', 'completed', 'failed');
+-- ── 1. Custom Types (Idempotent Creation & Safe Enum Synchronization) ──
+DO $$ BEGIN
+  CREATE TYPE user_role AS ENUM ('user', 'admin');
+EXCEPTION WHEN duplicate_object THEN null; END $$;
+ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'user';
+ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'admin';
+
+DO $$ BEGIN
+  CREATE TYPE subscription_status AS ENUM ('active', 'inactive', 'cancelled', 'lapsed');
+EXCEPTION WHEN duplicate_object THEN null; END $$;
+ALTER TYPE subscription_status ADD VALUE IF NOT EXISTS 'active';
+ALTER TYPE subscription_status ADD VALUE IF NOT EXISTS 'inactive';
+ALTER TYPE subscription_status ADD VALUE IF NOT EXISTS 'cancelled';
+ALTER TYPE subscription_status ADD VALUE IF NOT EXISTS 'lapsed';
+
+DO $$ BEGIN
+  CREATE TYPE subscription_plan AS ENUM ('monthly', 'yearly');
+EXCEPTION WHEN duplicate_object THEN null; END $$;
+ALTER TYPE subscription_plan ADD VALUE IF NOT EXISTS 'monthly';
+ALTER TYPE subscription_plan ADD VALUE IF NOT EXISTS 'yearly';
+
+DO $$ BEGIN
+  CREATE TYPE draw_status AS ENUM ('simulated', 'published', 'locked');
+EXCEPTION WHEN duplicate_object THEN null; END $$;
+ALTER TYPE draw_status ADD VALUE IF NOT EXISTS 'simulated';
+ALTER TYPE draw_status ADD VALUE IF NOT EXISTS 'published';
+ALTER TYPE draw_status ADD VALUE IF NOT EXISTS 'locked';
+
+DO $$ BEGIN
+  CREATE TYPE draw_type AS ENUM ('random', 'algorithmic');
+EXCEPTION WHEN duplicate_object THEN null; END $$;
+ALTER TYPE draw_type ADD VALUE IF NOT EXISTS 'random';
+ALTER TYPE draw_type ADD VALUE IF NOT EXISTS 'algorithmic';
+
+DO $$ BEGIN
+  CREATE TYPE verification_status AS ENUM ('pending', 'approved', 'rejected');
+EXCEPTION WHEN duplicate_object THEN null; END $$;
+ALTER TYPE verification_status ADD VALUE IF NOT EXISTS 'pending';
+ALTER TYPE verification_status ADD VALUE IF NOT EXISTS 'approved';
+ALTER TYPE verification_status ADD VALUE IF NOT EXISTS 'rejected';
+
+DO $$ BEGIN
+  CREATE TYPE payout_status AS ENUM ('pending', 'paid');
+EXCEPTION WHEN duplicate_object THEN null; END $$;
+ALTER TYPE payout_status ADD VALUE IF NOT EXISTS 'pending';
+ALTER TYPE payout_status ADD VALUE IF NOT EXISTS 'paid';
+
+DO $$ BEGIN
+  CREATE TYPE payment_status AS ENUM ('pending', 'completed');
+EXCEPTION WHEN duplicate_object THEN null; END $$;
+ALTER TYPE payment_status ADD VALUE IF NOT EXISTS 'pending';
+ALTER TYPE payment_status ADD VALUE IF NOT EXISTS 'completed';
+
+DO $$ BEGIN
+  CREATE TYPE stripe_event_status AS ENUM ('processing', 'completed', 'failed');
+EXCEPTION WHEN duplicate_object THEN null; END $$;
+ALTER TYPE stripe_event_status ADD VALUE IF NOT EXISTS 'processing';
+ALTER TYPE stripe_event_status ADD VALUE IF NOT EXISTS 'completed';
+ALTER TYPE stripe_event_status ADD VALUE IF NOT EXISTS 'failed';
 
 -- ═══════════════════════════════════════════════════
--- 1. USERS TABLE (public profile, linked to auth.users)
+-- 2. CHARITIES TABLE (Created first for foreign key bindings)
 -- ═══════════════════════════════════════════════════
-CREATE TABLE public.users (
+CREATE TABLE IF NOT EXISTS public.charities (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  image_url TEXT,
+  is_featured BOOLEAN NOT NULL DEFAULT false,
+  upcoming_events TEXT,
+  total_contributions NUMERIC NOT NULL DEFAULT 0 CHECK (total_contributions >= 0),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- ═══════════════════════════════════════════════════
+-- 3. USERS TABLE (public profile, linked to auth.users)
+-- ═══════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS public.users (
   id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   email TEXT NOT NULL,
   full_name TEXT NOT NULL DEFAULT '',
@@ -32,11 +95,21 @@ CREATE TABLE public.users (
   subscription_start_date TIMESTAMPTZ,
   subscription_end_date TIMESTAMPTZ,
   checkout_lock_until TIMESTAMPTZ,
-  selected_charity_id UUID,
+  selected_charity_id UUID REFERENCES public.charities(id) ON DELETE SET NULL,
   charity_contribution_percentage INTEGER NOT NULL DEFAULT 10 CHECK (charity_contribution_percentage >= 10 AND charity_contribution_percentage <= 50),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Ensure FK constraint exists
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_users_charity') THEN
+    ALTER TABLE public.users
+      ADD CONSTRAINT fk_users_charity
+      FOREIGN KEY (selected_charity_id) REFERENCES public.charities(id) ON DELETE SET NULL;
+  END IF;
+EXCEPTION WHEN OTHERS THEN null;
+END $$;
 
 -- Auto-create user profile on auth signup
 CREATE OR REPLACE FUNCTION public.handle_new_user()
@@ -47,11 +120,16 @@ BEGIN
     NEW.id,
     NEW.email,
     COALESCE(NEW.raw_user_meta_data ->> 'full_name', '')
-  );
+  )
+  ON CONFLICT (id) DO UPDATE
+  SET email = EXCLUDED.email,
+      full_name = CASE WHEN public.users.full_name = '' THEN EXCLUDED.full_name ELSE public.users.full_name END,
+      updated_at = now();
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
 
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 CREATE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
   FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
@@ -70,6 +148,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
 
+DROP TRIGGER IF EXISTS on_auth_user_email_updated ON auth.users;
 CREATE TRIGGER on_auth_user_email_updated
   AFTER UPDATE OF email ON auth.users
   FOR EACH ROW EXECUTE FUNCTION public.handle_user_email_sync();
@@ -83,33 +162,15 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS users_updated_at ON public.users;
 CREATE TRIGGER users_updated_at
   BEFORE UPDATE ON public.users
   FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 
 -- ═══════════════════════════════════════════════════
--- 2. CHARITIES TABLE
+-- 4. GOLF SCORES TABLE
 -- ═══════════════════════════════════════════════════
-CREATE TABLE public.charities (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  name TEXT NOT NULL,
-  description TEXT NOT NULL DEFAULT '',
-  image_url TEXT,
-  is_featured BOOLEAN NOT NULL DEFAULT false,
-  upcoming_events TEXT,
-  total_contributions NUMERIC NOT NULL DEFAULT 0 CHECK (total_contributions >= 0),
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
--- Add FK constraint to users after charities table exists
-ALTER TABLE public.users
-  ADD CONSTRAINT fk_users_charity
-  FOREIGN KEY (selected_charity_id) REFERENCES public.charities(id) ON DELETE SET NULL;
-
--- ═══════════════════════════════════════════════════
--- 3. GOLF SCORES TABLE
--- ═══════════════════════════════════════════════════
-CREATE TABLE public.golf_scores (
+CREATE TABLE IF NOT EXISTS public.golf_scores (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
   score INTEGER NOT NULL CHECK (score >= 1 AND score <= 45),
@@ -117,13 +178,13 @@ CREATE TABLE public.golf_scores (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_scores_user ON public.golf_scores(user_id);
-CREATE INDEX idx_scores_date ON public.golf_scores(user_id, date_played DESC);
+CREATE INDEX IF NOT EXISTS idx_scores_user ON public.golf_scores(user_id);
+CREATE INDEX IF NOT EXISTS idx_scores_date ON public.golf_scores(user_id, date_played DESC);
 
 -- ═══════════════════════════════════════════════════
--- 4. DRAWS TABLE
+-- 5. DRAWS TABLE
 -- ═══════════════════════════════════════════════════
-CREATE TABLE public.draws (
+CREATE TABLE IF NOT EXISTS public.draws (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   draw_month DATE NOT NULL UNIQUE,
   status draw_status NOT NULL DEFAULT 'simulated',
@@ -136,9 +197,9 @@ CREATE TABLE public.draws (
 );
 
 -- ═══════════════════════════════════════════════════
--- 5. DRAW ENTRIES TABLE
+-- 6. DRAW ENTRIES TABLE
 -- ═══════════════════════════════════════════════════
-CREATE TABLE public.draw_entries (
+CREATE TABLE IF NOT EXISTS public.draw_entries (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   draw_id UUID NOT NULL REFERENCES public.draws(id) ON DELETE CASCADE,
   user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
@@ -148,9 +209,9 @@ CREATE TABLE public.draw_entries (
 );
 
 -- ═══════════════════════════════════════════════════
--- 6. DRAW WINNERS TABLE
+-- 7. DRAW WINNERS TABLE
 -- ═══════════════════════════════════════════════════
-CREATE TABLE public.draw_winners (
+CREATE TABLE IF NOT EXISTS public.draw_winners (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   draw_id UUID NOT NULL REFERENCES public.draws(id) ON DELETE CASCADE,
   user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
@@ -166,9 +227,9 @@ CREATE TABLE public.draw_winners (
 );
 
 -- ═══════════════════════════════════════════════════
--- 7. INDEPENDENT DONATIONS TABLE
+-- 8. INDEPENDENT DONATIONS TABLE
 -- ═══════════════════════════════════════════════════
-CREATE TABLE public.independent_donations (
+CREATE TABLE IF NOT EXISTS public.independent_donations (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   user_id UUID REFERENCES public.users(id) ON DELETE SET NULL,
   charity_id UUID NOT NULL REFERENCES public.charities(id) ON DELETE RESTRICT,
@@ -179,9 +240,9 @@ CREATE TABLE public.independent_donations (
 );
 
 -- ═══════════════════════════════════════════════════
--- 8. STRIPE EVENTS (Stateful Webhook Idempotency)
+-- 9. STRIPE EVENTS (Stateful Webhook Idempotency)
 -- ═══════════════════════════════════════════════════
-CREATE TABLE public.stripe_events (
+CREATE TABLE IF NOT EXISTS public.stripe_events (
   id TEXT PRIMARY KEY,
   event_type TEXT NOT NULL,
   status stripe_event_status NOT NULL DEFAULT 'processing',
@@ -190,9 +251,9 @@ CREATE TABLE public.stripe_events (
 );
 
 -- ═══════════════════════════════════════════════════
--- 9. AUDIT LOGS TABLE
+-- 10. AUDIT LOGS TABLE
 -- ═══════════════════════════════════════════════════
-CREATE TABLE public.audit_logs (
+CREATE TABLE IF NOT EXISTS public.audit_logs (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   actor_id UUID REFERENCES public.users(id) ON DELETE SET NULL,
   action TEXT NOT NULL,
@@ -202,11 +263,11 @@ CREATE TABLE public.audit_logs (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_audit_logs_actor ON public.audit_logs(actor_id);
-CREATE INDEX idx_audit_logs_created ON public.audit_logs(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_actor ON public.audit_logs(actor_id);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON public.audit_logs(created_at DESC);
 
 -- ═══════════════════════════════════════════════════
--- 10. SECURITY & TRANSACTIONAL FUNCTIONS / TRIGGERS
+-- 11. SECURITY & TRANSACTIONAL FUNCTIONS / TRIGGERS
 -- ═══════════════════════════════════════════════════
 
 -- A. Protect User Protected Columns from Self-Escalation
@@ -256,6 +317,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
 
+DROP TRIGGER IF EXISTS protect_user_fields_trigger ON public.users;
 CREATE TRIGGER protect_user_fields_trigger
   BEFORE UPDATE ON public.users
   FOR EACH ROW EXECUTE FUNCTION public.protect_user_fields();
@@ -303,6 +365,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
 
+DROP TRIGGER IF EXISTS protect_draw_winner_fields_trigger ON public.draw_winners;
 CREATE TRIGGER protect_draw_winner_fields_trigger
   BEFORE UPDATE ON public.draw_winners
   FOR EACH ROW EXECUTE FUNCTION public.protect_draw_winner_fields();
@@ -324,6 +387,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
 
+DROP TRIGGER IF EXISTS protect_charity_contributions_trigger ON public.charities;
 CREATE TRIGGER protect_charity_contributions_trigger
   BEFORE UPDATE ON public.charities
   FOR EACH ROW EXECUTE FUNCTION public.protect_charity_contributions();
@@ -359,7 +423,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
 
--- D. Enforce 5-Score Maximum Transactionally via FIFO RPC with Caller-Identity Boundary & Concurrency Row Locking
+-- D. Enforce 5-Score Maximum Transactionally via FIFO RPC
 CREATE OR REPLACE FUNCTION public.add_golf_score(
   p_user_id UUID,
   p_score INT,
@@ -450,51 +514,53 @@ BEGIN
     RAISE EXCEPTION 'Illegal transition: Only simulated draws can be published. Current status: %', v_draw.status;
   END IF;
 
-  -- Delete existing winners for this draw if any
-  DELETE FROM public.draw_winners WHERE draw_id = p_draw_id;
-
-  -- Insert all winners atomically
-  FOR v_winner IN SELECT * FROM jsonb_array_elements(p_winners) LOOP
-    INSERT INTO public.draw_winners (
-      draw_id,
-      user_id,
-      match_type,
-      prize_amount,
-      verification_status,
-      payout_status
-    ) VALUES (
-      p_draw_id,
-      (v_winner->>'user_id')::UUID,
-      v_winner->>'match_type',
-      (v_winner->>'prize_amount')::NUMERIC,
-      'pending',
-      'pending'
-    );
-  END LOOP;
-
-  -- Update draw status to published and persist rollover
+  -- 1. Update the draw status and rollover amount
   UPDATE public.draws
   SET status = 'published',
-      published_at = now(),
-      rollover_amount = p_rollover
+      rollover_amount = p_rollover,
+      published_at = now()
   WHERE id = p_draw_id;
 
-  -- Insert audit log in same transaction
+  -- 2. Clear any pre-existing winner records for this draw
+  DELETE FROM public.draw_winners WHERE draw_id = p_draw_id;
+
+  -- 3. Bulk insert winner records atomically from JSON array
+  IF p_winners IS NOT NULL AND jsonb_array_length(p_winners) > 0 THEN
+    FOR v_winner IN SELECT * FROM jsonb_array_elements(p_winners)
+    LOOP
+      INSERT INTO public.draw_winners (
+        draw_id,
+        user_id,
+        match_type,
+        prize_amount,
+        verification_status,
+        payout_status
+      ) VALUES (
+        p_draw_id,
+        (v_winner->>'user_id')::UUID,
+        v_winner->>'match_type',
+        (v_winner->>'prize_amount')::NUMERIC,
+        'pending',
+        'pending'
+      );
+    END LOOP;
+  END IF;
+
+  -- 4. Audit Log entry
   INSERT INTO public.audit_logs (actor_id, action, target_type, target_id, details)
   VALUES (
     p_actor_id,
-    'PUBLISH_DRAW',
+    'PUBLISH_DRAW_ATOMIC',
     'draws',
     p_draw_id::TEXT,
     jsonb_build_object(
       'draw_month', v_draw.draw_month,
-      'winners_count', jsonb_array_length(p_winners),
-      'prize_pool', v_draw.total_prize_pool,
-      'rollover_amount', p_rollover
+      'rollover_amount', p_rollover,
+      'winner_count', COALESCE(jsonb_array_length(p_winners), 0)
     )
   );
 
-  RETURN jsonb_build_object('success', true, 'winners_count', jsonb_array_length(p_winners));
+  RETURN jsonb_build_object('success', true, 'draw_id', p_draw_id, 'status', 'published');
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
 
@@ -618,7 +684,20 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
 
 -- ═══════════════════════════════════════════════════
--- H. EXPLICIT EXECUTION PRIVILEGE REVOCATIONS & GRANTS
+-- 12. HELPER: SAFE ADMIN CHECK (PREVENTS RLS RECURSION)
+-- ═══════════════════════════════════════════════════
+CREATE OR REPLACE FUNCTION public.is_admin()
+RETURNS BOOLEAN AS $$
+BEGIN
+  RETURN EXISTS (
+    SELECT 1 FROM public.users
+    WHERE id = auth.uid() AND role = 'admin'
+  );
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
+
+-- ═══════════════════════════════════════════════════
+-- 13. EXPLICIT EXECUTION PRIVILEGE REVOCATIONS & GRANTS
 -- ═══════════════════════════════════════════════════
 
 -- 1. Trigger functions: Internal trigger execution only
@@ -634,6 +713,9 @@ GRANT EXECUTE ON FUNCTION public.claim_checkout_lock(UUID) TO authenticated, ser
 
 REVOKE ALL ON FUNCTION public.add_golf_score(UUID, INT, DATE) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.add_golf_score(UUID, INT, DATE) TO authenticated, service_role;
+
+REVOKE ALL ON FUNCTION public.is_admin() FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.is_admin() TO authenticated, service_role;
 
 -- 3. Service-role administrative and webhook financial RPCs
 REVOKE ALL ON FUNCTION public.publish_draw_atomic(UUID, JSONB, NUMERIC, UUID) FROM PUBLIC, anon, authenticated;
@@ -652,23 +734,7 @@ REVOKE ALL ON FUNCTION public.fail_stripe_event(TEXT) FROM PUBLIC, anon, authent
 GRANT EXECUTE ON FUNCTION public.fail_stripe_event(TEXT) TO service_role;
 
 -- ═══════════════════════════════════════════════════
--- 11. HELPER: SAFE ADMIN CHECK (PREVENTS RLS RECURSION)
--- ═══════════════════════════════════════════════════
-CREATE OR REPLACE FUNCTION public.is_admin()
-RETURNS BOOLEAN AS $$
-BEGIN
-  RETURN EXISTS (
-    SELECT 1 FROM public.users
-    WHERE id = auth.uid() AND role = 'admin'
-  );
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
-
-REVOKE ALL ON FUNCTION public.is_admin() FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.is_admin() TO authenticated, service_role;
-
--- ═══════════════════════════════════════════════════
--- 12. ROW LEVEL SECURITY (RLS) POLICIES
+-- 14. ROW LEVEL SECURITY (RLS) POLICIES (Idempotent Drops & Grants)
 -- ═══════════════════════════════════════════════════
 
 ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
@@ -682,44 +748,69 @@ ALTER TABLE public.audit_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.stripe_events ENABLE ROW LEVEL SECURITY;
 
 -- Users
+DROP POLICY IF EXISTS "Users can read own profile" ON public.users;
 CREATE POLICY "Users can read own profile" ON public.users FOR SELECT USING (auth.uid() = id);
+
+DROP POLICY IF EXISTS "Users can update own profile" ON public.users;
 CREATE POLICY "Users can update own profile" ON public.users FOR UPDATE USING (auth.uid() = id);
+
+DROP POLICY IF EXISTS "Admin full access users" ON public.users;
 CREATE POLICY "Admin full access users" ON public.users FOR ALL USING (public.is_admin());
 
 -- Charities
+DROP POLICY IF EXISTS "Public read charities" ON public.charities;
 CREATE POLICY "Public read charities" ON public.charities FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "Admin manage charities" ON public.charities;
 CREATE POLICY "Admin manage charities" ON public.charities FOR ALL USING (public.is_admin());
 
 -- Golf Scores (Direct client INSERT is disabled; score submissions must go through the transactional add_golf_score RPC)
+DROP POLICY IF EXISTS "Users read own scores" ON public.golf_scores;
 CREATE POLICY "Users read own scores" ON public.golf_scores FOR SELECT USING (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Users delete own scores" ON public.golf_scores;
 CREATE POLICY "Users delete own scores" ON public.golf_scores FOR DELETE USING (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Admin full access scores" ON public.golf_scores;
 CREATE POLICY "Admin full access scores" ON public.golf_scores FOR ALL USING (public.is_admin());
 
 -- Draws (published and locked are public read)
-CREATE POLICY "Public read published draws" ON public.draws FOR SELECT USING (status IN ('published', 'locked'));
+DROP POLICY IF EXISTS "Public read published draws" ON public.draws;
+CREATE POLICY "Public read published draws" ON public.draws FOR SELECT USING (status::text IN ('published', 'locked'));
+
+DROP POLICY IF EXISTS "Admin manage draws" ON public.draws;
 CREATE POLICY "Admin manage draws" ON public.draws FOR ALL USING (public.is_admin());
 
 -- Draw Entries
+DROP POLICY IF EXISTS "Users read own entries" ON public.draw_entries;
 CREATE POLICY "Users read own entries" ON public.draw_entries FOR SELECT USING (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Admin manage entries" ON public.draw_entries;
 CREATE POLICY "Admin manage entries" ON public.draw_entries FOR ALL USING (public.is_admin());
 
 -- Draw Winners
+DROP POLICY IF EXISTS "Users read own winnings" ON public.draw_winners;
 CREATE POLICY "Users read own winnings" ON public.draw_winners FOR SELECT USING (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Users update own proof" ON public.draw_winners;
 CREATE POLICY "Users update own proof" ON public.draw_winners FOR UPDATE USING (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Admin manage winners" ON public.draw_winners;
 CREATE POLICY "Admin manage winners" ON public.draw_winners FOR ALL USING (public.is_admin());
 
--- Independent Donations (Immutable financial ledger; read-only for users & admins, mutations restricted to service_role)
+-- Independent Donations
+DROP POLICY IF EXISTS "Users read own donations" ON public.independent_donations;
 CREATE POLICY "Users read own donations" ON public.independent_donations FOR SELECT USING (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Admin read donations" ON public.independent_donations;
 CREATE POLICY "Admin read donations" ON public.independent_donations FOR SELECT USING (public.is_admin());
 
 -- Audit Logs (Admin only)
+DROP POLICY IF EXISTS "Admin read audit logs" ON public.audit_logs;
 CREATE POLICY "Admin read audit logs" ON public.audit_logs FOR SELECT USING (public.is_admin());
 
--- Stripe Events (Service role only, no client access)
--- Default deny for non-service-role callers
-
 -- ═══════════════════════════════════════════════════
--- SEED DATA: Sample Charities
+-- SEED DATA: Sample Charities (Idempotent Upsert)
 -- ═══════════════════════════════════════════════════
 INSERT INTO public.charities (name, description, is_featured, upcoming_events, total_contributions) VALUES
   ('Youth Golf Foundation', 'Bringing golf to underprivileged communities, providing equipment, coaching, and opportunities for young people.', true, 'Annual Youth Tournament — June 2026', 142500),
