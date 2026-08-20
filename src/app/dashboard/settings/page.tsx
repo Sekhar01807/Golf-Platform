@@ -116,28 +116,34 @@ export default function SettingsPage() {
     e.preventDefault();
     try {
       setSavingAccount(true);
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
 
-      // Update public.users
-      await supabase
-        .from('users')
-        .update({
-          full_name: fullName.trim(),
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', user.id);
-
-      // Sync auth user metadata
-      await supabase.auth.updateUser({
-        data: {
-          full_name: fullName.trim(),
+      const res = await fetch('/api/profile', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fullName: fullName.trim(),
           phone: phone.trim(),
-          profile_visibility: profileVisibility,
-        },
+          profileVisibility,
+        }),
       });
 
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        showToast(data.error || 'Failed to save account changes', 'error');
+        return;
+      }
+
+      // Dispatch event to sync sidebar avatar & username
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(
+          new CustomEvent('profile-updated', {
+            detail: { fullName: fullName.trim() },
+          })
+        );
+      }
+
       showToast('Account details updated in database!', 'success');
+      router.refresh();
     } catch {
       showToast('Failed to save account changes', 'error');
     } finally {
@@ -185,12 +191,12 @@ export default function SettingsPage() {
     }
   };
 
-  // 3. Update Password (with Old Password Verification)
+  // 3. Update Password (with Strict Old Password Verification)
   const handleUpdatePassword = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!currentPassword) {
-      showToast('Please enter your current password for confirmation', 'warning');
+    if (!currentPassword || !currentPassword.trim()) {
+      showToast('Current password is required. You must enter your previous password.', 'error');
       return;
     }
     if (newPassword.length < 6) {
@@ -208,45 +214,29 @@ export default function SettingsPage() {
 
     try {
       setUpdatingPassword(true);
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user || !user.email) {
-        showToast('Session expired. Please sign in again.', 'error');
-        return;
-      }
 
-      // Step 1: Cryptographically verify current password with Supabase Auth
-      const { error: verifyError } = await supabase.auth.signInWithPassword({
-        email: user.email,
-        password: currentPassword,
+      const res = await fetch('/api/auth/password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          currentPassword: currentPassword.trim(),
+          newPassword,
+        }),
       });
 
-      if (verifyError) {
-        showToast('Incorrect current password. Please re-enter your old password.', 'error');
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        showToast(data.error || 'Failed to update password', 'error');
         return;
       }
 
-      // Step 2: Cryptographically re-hash and update to new password
-      const { error: updateError } = await supabase.auth.updateUser({
-        password: newPassword,
-      });
-
-      if (updateError) {
-        showToast(updateError.message || 'Failed to update password', 'error');
-        return;
-      }
-
-      // Step 3: Record updated_at in database
-      await supabase
-        .from('users')
-        .update({ updated_at: new Date().toISOString() })
-        .eq('id', user.id);
-
-      showToast('Password updated and encrypted in database!', 'success');
+      showToast('Password updated and encrypted successfully!', 'success');
       setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Error updating password', 'error');
+    } catch (err: any) {
+      showToast(err?.message || 'Error updating password', 'error');
     } finally {
       setUpdatingPassword(false);
     }
@@ -270,10 +260,20 @@ export default function SettingsPage() {
     e.preventDefault();
     try {
       setSavingPrefs(true);
-      await supabase.auth.updateUser({
-        data: { preferences },
+      const res = await fetch('/api/profile', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ preferences }),
       });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        showToast(data.error || 'Failed to save preferences', 'error');
+        return;
+      }
+
       showToast('Preferences updated successfully!', 'success');
+      router.refresh();
     } catch {
       showToast('Failed to save preferences', 'error');
     } finally {
@@ -578,7 +578,7 @@ export default function SettingsPage() {
           <button
             type="submit"
             className="btn btn-secondary btn-sm"
-            disabled={updatingPassword || !currentPassword || !newPassword}
+            disabled={updatingPassword || !currentPassword.trim() || !newPassword || !confirmPassword}
           >
             {updatingPassword ? 'Verifying & Updating...' : 'Update Password'}
           </button>

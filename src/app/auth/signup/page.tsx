@@ -46,19 +46,18 @@ export default function SignupPage() {
     return (
       <div className={styles.authPage}>
         <div className={styles.authCard}>
-            <div className={styles.authBadge}>
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect width="20" height="16" x="2" y="4" rx="2"></rect>
-                <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L1 7"></path>
-              </svg>
-            </div>
-            <h1>Check Your Email</h1>
-            <p>
-              We have dispatched a confirmation link to <strong>{email}</strong>.
-              Click the link to verify your account and begin tracking your impact.
-            </p>
+          <div className={styles.authBadge}>
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect width="20" height="16" x="2" y="4" rx="2"></rect>
+              <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L1 7"></path>
+            </svg>
           </div>
-          <Link href="/auth/login" className="btn btn-primary" style={{ width: '100%', textAlign: 'center' }}>
+          <h1>Check Your Email</h1>
+          <p>
+            We have dispatched a confirmation link to <strong>{email}</strong>.
+            Click the link to verify your account and begin tracking your impact.
+          </p>
+          <Link href="/auth/login" className="btn btn-primary" style={{ width: '100%', textAlign: 'center', marginTop: '1rem' }}>
             Go to Sign In
           </Link>
         </div>
