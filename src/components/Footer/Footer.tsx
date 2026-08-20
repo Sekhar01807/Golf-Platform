@@ -27,7 +27,7 @@ export default function Footer() {
           <div className={styles.linkGroup}>
             <h4>Account</h4>
             <Link href="/dashboard">Dashboard</Link>
-            <Link href="/dashboard/scores">Submit Scores</Link>
+            <Link href="/dashboard/scores">Add Scores</Link>
             <Link href="/dashboard/charity">My Charity</Link>
             <Link href="/dashboard/draws">Prize Draws</Link>
           </div>

@@ -133,7 +133,7 @@ export default function ScoresPage() {
             />
           </div>
           <button type="submit" className="btn btn-primary" disabled={submitting}>
-            {submitting ? 'Submitting Score...' : '+ Submit Score'}
+            {submitting ? 'Adding Score...' : '+ Add Score'}
           </button>
         </form>
       </div>

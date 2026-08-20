@@ -286,7 +286,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 }
               }}
             >
-              <span>+ Submit Score</span>
+              <span>+ Add Score</span>
             </Link>
           </div>
         </header>
