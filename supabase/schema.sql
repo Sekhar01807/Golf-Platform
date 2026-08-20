@@ -101,6 +101,14 @@ CREATE TABLE IF NOT EXISTS public.users (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Ensure all columns exist on pre-existing users table
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS checkout_lock_until TIMESTAMPTZ;
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS selected_charity_id UUID;
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS charity_contribution_percentage INTEGER NOT NULL DEFAULT 10;
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS subscription_plan subscription_plan;
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS subscription_start_date TIMESTAMPTZ;
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS subscription_end_date TIMESTAMPTZ;
+
 -- Ensure FK constraint exists
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_users_charity') THEN

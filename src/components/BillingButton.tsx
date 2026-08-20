@@ -2,7 +2,13 @@
 
 import { useState } from 'react';
 
-export default function BillingButton({ className, children }: { className?: string; children: React.ReactNode }) {
+interface BillingButtonProps {
+  className?: string;
+  style?: React.CSSProperties;
+  children?: React.ReactNode;
+}
+
+export default function BillingButton({ className, style, children = 'Manage Subscription in Stripe' }: BillingButtonProps) {
   const [loading, setLoading] = useState(false);
 
   const handleBilling = async () => {
@@ -28,7 +34,7 @@ export default function BillingButton({ className, children }: { className?: str
       className={className} 
       onClick={handleBilling} 
       disabled={loading}
-      style={{ opacity: loading ? 0.7 : 1, cursor: loading ? 'not-allowed' : 'pointer' }}
+      style={{ opacity: loading ? 0.7 : 1, cursor: loading ? 'not-allowed' : 'pointer', ...style }}
     >
       {loading ? 'Please Wait...' : children}
     </button>

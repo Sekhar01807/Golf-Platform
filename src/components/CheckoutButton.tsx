@@ -6,10 +6,10 @@ interface CheckoutButtonProps {
   plan: 'monthly' | 'yearly';
   className?: string;
   style?: React.CSSProperties;
-  children: React.ReactNode;
+  children?: React.ReactNode;
 }
 
-export default function CheckoutButton({ plan, className, style, children }: CheckoutButtonProps) {
+export default function CheckoutButton({ plan, className, style, children = 'Subscribe Now' }: CheckoutButtonProps) {
   const [loading, setLoading] = useState(false);
 
   const handleCheckout = async () => {
