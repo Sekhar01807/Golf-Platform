@@ -1,126 +1,143 @@
 import React from 'react';
 
-interface IconProps {
+export interface IconProps {
   className?: string;
   size?: number;
   color?: string;
+  style?: React.CSSProperties;
 }
 
-export function DashboardIcon({ size = 18, color = 'currentColor' }: IconProps) {
+// Material UI: GridView / Dashboard
+export function DashboardIcon({ size = 20, color = 'currentColor', style }: IconProps) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="3" y="3" width="7" height="7"></rect>
-      <rect x="14" y="3" width="7" height="7"></rect>
-      <rect x="14" y="14" width="7" height="7"></rect>
-      <rect x="3" y="14" width="7" height="7"></rect>
+    <svg width={size} height={size} viewBox="0 0 24 24" fill={color} style={style}>
+      <path d="M3 3v8h8V3H3zm6 6H5V5h4v4zm-6 4v8h8v-8H3zm6 6H5v-4h4v4zm4-16v8h8V3h-8zm6 6h-4V5h4v4zm-6 4v8h8v-8h-8zm6 6h-4v-4h4v4z" />
     </svg>
   );
 }
 
-export function ScorecardIcon({ size = 18, color = 'currentColor' }: IconProps) {
+// Material UI: SportsGolf / Scoreboard
+export function ScorecardIcon({ size = 20, color = 'currentColor', style }: IconProps) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
-      <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
-      <path d="M8 7h8"></path>
-      <path d="M8 11h8"></path>
+    <svg width={size} height={size} viewBox="0 0 24 24" fill={color} style={style}>
+      <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z" />
     </svg>
   );
 }
 
-export function HeartIcon({ size = 18, color = 'currentColor' }: IconProps) {
+// Material UI: VolunteerActivism / Favorite / Heart
+export function HeartIcon({ size = 20, color = 'currentColor', style }: IconProps) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"></path>
+    <svg width={size} height={size} viewBox="0 0 24 24" fill={color} style={style}>
+      <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" />
     </svg>
   );
 }
 
-export function TicketIcon({ size = 18, color = 'currentColor' }: IconProps) {
+// Material UI: ConfirmationNumber / Casino / Ticket
+export function TicketIcon({ size = 20, color = 'currentColor', style }: IconProps) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="2" y="6" width="20" height="12" rx="2"></rect>
-      <path d="M12 12h.01"></path>
-      <path d="M17 12h.01"></path>
-      <path d="M7 12h.01"></path>
+    <svg width={size} height={size} viewBox="0 0 24 24" fill={color} style={style}>
+      <path d="M22 10V6c0-1.11-.9-2-2-2H4c-1.1 0-1.99.89-1.99 2v4c1.1 0 1.99.9 1.99 2s-.89 2-2 2v4c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2v-4c-1.1 0-2-.9-2-2s.9-2 2-2zm-2-1.46c-1.19.69-2 1.99-2 3.46s.81 2.77 2 3.46V18H4v-2.54c1.19-.69 2-1.99 2-3.46 0-1.48-.8-2.77-1.99-3.46L4 6h16v2.54z" />
     </svg>
   );
 }
 
-export function TrophyIcon({ size = 18, color = 'currentColor' }: IconProps) {
+// Material UI: EmojiEvents / Trophy
+export function TrophyIcon({ size = 20, color = 'currentColor', style }: IconProps) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"></path>
-      <path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"></path>
-      <path d="M4 22h16"></path>
-      <path d="M10 14.66V17c0 .55-.45 1-1 1H8c-.55 0-1 .45-1 1v1c0 .55.45 1 1 1h8c.55 0 1-.45 1-1v-1c0-.55-.45-1-1-1h-1c-.55 0-1-.45-1-1v-2.34"></path>
-      <path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"></path>
+    <svg width={size} height={size} viewBox="0 0 24 24" fill={color} style={style}>
+      <path d="M19 5h-2V3H7v2H5c-1.1 0-2 .9-2 2v1c0 2.55 1.92 4.63 4.39 4.94.63 1.5 1.98 2.63 3.61 2.96V19H7v2h10v-2h-4v-3.1c1.63-.33 2.98-1.46 3.61-2.96C19.08 12.63 21 10.55 21 8V7c0-1.1-.9-2-2-2zM5 8V7h2v3.82C5.84 10.4 5 9.3 5 8zm14 0c0 1.3-.84 2.4-2 2.82V7h2v1z" />
     </svg>
   );
 }
 
-export function CreditCardIcon({ size = 18, color = 'currentColor' }: IconProps) {
+// Material UI: CreditCard
+export function CreditCardIcon({ size = 20, color = 'currentColor', style }: IconProps) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="2" y="5" width="20" height="14" rx="2"></rect>
-      <line x1="2" y1="10" x2="22" y2="10"></line>
+    <svg width={size} height={size} viewBox="0 0 24 24" fill={color} style={style}>
+      <path d="M20 4H4c-1.11 0-1.99.89-1.99 2L2 18c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V6c0-1.11-.89-2-2-2zm0 14H4v-6h16v6zm0-10H4V6h16v2z" />
     </svg>
   );
 }
 
-export function UserIcon({ size = 18, color = 'currentColor' }: IconProps) {
+// Material UI: Person / AccountCircle
+export function UserIcon({ size = 20, color = 'currentColor', style }: IconProps) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"></path>
-      <circle cx="12" cy="7" r="4"></circle>
+    <svg width={size} height={size} viewBox="0 0 24 24" fill={color} style={style}>
+      <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" />
     </svg>
   );
 }
 
-export function UsersIcon({ size = 18, color = 'currentColor' }: IconProps) {
+// Material UI: Group / People
+export function UsersIcon({ size = 20, color = 'currentColor', style }: IconProps) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path>
-      <circle cx="9" cy="7" r="4"></circle>
-      <path d="M22 21v-2a4 4 0 0 0-3-3.87"></path>
-      <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+    <svg width={size} height={size} viewBox="0 0 24 24" fill={color} style={style}>
+      <path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z" />
     </svg>
   );
 }
 
-export function SettingsIcon({ size = 18, color = 'currentColor' }: IconProps) {
+// Material UI: Settings / Tune
+export function SettingsIcon({ size = 20, color = 'currentColor', style }: IconProps) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path>
-      <circle cx="12" cy="12" r="3"></circle>
+    <svg width={size} height={size} viewBox="0 0 24 24" fill={color} style={style}>
+      <path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z" />
     </svg>
   );
 }
 
-export function LogoutIcon({ size = 18, color = 'currentColor' }: IconProps) {
+// Material UI: Logout / ExitToApp
+export function LogoutIcon({ size = 20, color = 'currentColor', style }: IconProps) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
-      <polyline points="16 17 21 12 16 7"></polyline>
-      <line x1="21" y1="12" x2="9" y2="12"></line>
+    <svg width={size} height={size} viewBox="0 0 24 24" fill={color} style={style}>
+      <path d="M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z" />
     </svg>
   );
 }
 
-export function BarChartIcon({ size = 18, color = 'currentColor' }: IconProps) {
+// Material UI: BarChart / Insights
+export function BarChartIcon({ size = 20, color = 'currentColor', style }: IconProps) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <line x1="18" y1="20" x2="18" y2="10"></line>
-      <line x1="12" y1="20" x2="12" y2="4"></line>
-      <line x1="6" y1="20" x2="6" y2="14"></line>
+    <svg width={size} height={size} viewBox="0 0 24 24" fill={color} style={style}>
+      <path d="M4 9h4v11H4zm6-5h4v16h-4zm6 8h4v8h-4z" />
     </svg>
   );
 }
 
-export function ShieldIcon({ size = 18, color = 'currentColor' }: IconProps) {
+// Material UI: Security / VerifiedUser / Shield
+export function ShieldIcon({ size = 20, color = 'currentColor', style }: IconProps) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+    <svg width={size} height={size} viewBox="0 0 24 24" fill={color} style={style}>
+      <path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z" />
+    </svg>
+  );
+}
+
+// Material UI: WorkspacePremium / Crown / Star
+export function CrownIcon({ size = 20, color = '#D4A84F', style }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill={color} style={style}>
+      <path d="M5 16L3 5l5.5 5L12 4l3.5 6L21 5l-2 11H5zm14 3c0 .55-.45 1-1 1H6c-.55 0-1-.45-1-1v-1h14v1z" />
+    </svg>
+  );
+}
+
+// Material UI: Edit / ModeEdit
+export function EditIcon({ size = 18, color = 'currentColor', style }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill={color} style={style}>
+      <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z" />
+    </svg>
+  );
+}
+
+// Material UI: CheckCircle / Verified
+export function CheckCircleIcon({ size = 18, color = '#1E6B42', style }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill={color} style={style}>
+      <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />
     </svg>
   );
 }

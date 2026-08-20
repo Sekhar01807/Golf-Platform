@@ -13,6 +13,7 @@ export default function CheckoutButton({ plan, className, style, children }: Che
   const [loading, setLoading] = useState(false);
 
   const handleCheckout = async () => {
+    if (loading) return;
     try {
       setLoading(true);
       const res = await fetch('/api/checkout', {
@@ -21,15 +22,15 @@ export default function CheckoutButton({ plan, className, style, children }: Che
         body: JSON.stringify({ plan }),
       });
       
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       
-      if (data.url) {
+      if (res.ok && data.url) {
         window.location.href = data.url;
       } else {
-        alert(data.error || 'Failed to initialize checkout');
+        alert(data.error || 'Failed to initialize checkout. Please try again.');
       }
     } catch {
-      alert('An error occurred during checkout');
+      alert('Unable to connect to the checkout service. Please check your network and try again.');
     } finally {
       setLoading(false);
     }

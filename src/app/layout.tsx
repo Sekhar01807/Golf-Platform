@@ -1,3 +1,4 @@
+import type { Metadata } from 'next';
 import AppLayoutWrapper from '@/components/Layout/AppLayoutWrapper';
 import './globals.css';
 
@@ -21,7 +22,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="en" data-scroll-behavior="smooth">
       <body>
         <AppLayoutWrapper>
           {children}

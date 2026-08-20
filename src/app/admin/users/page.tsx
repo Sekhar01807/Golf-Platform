@@ -35,6 +35,58 @@ export default function AdminUsersPage() {
       (u.email || '').toLowerCase().includes(search.toLowerCase())
   );
 
+  const handleUpdateRole = async (userId: string, currentRole: string, userName: string) => {
+    const newRole = currentRole === 'admin' ? 'user' : 'admin';
+    if (!confirm(`Are you sure you want to change ${userName || 'this user'}'s role to ${newRole.toUpperCase()}?`)) {
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/admin/users', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId, role: newRole }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        showToast(data.error || 'Failed to update user role', 'error');
+        return;
+      }
+
+      showToast(`User role updated to ${newRole.toUpperCase()}`, 'success');
+      await fetchUsers();
+    } catch {
+      showToast('Network error updating user role', 'error');
+    }
+  };
+
+  const handleUpdateSubscription = async (userId: string, currentStatus: string, userName: string) => {
+    const newStatus = currentStatus === 'active' ? 'inactive' : 'active';
+    try {
+      const res = await fetch('/api/admin/users', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId,
+          subscription_status: newStatus,
+          subscription_plan: newStatus === 'active' ? 'monthly' : null,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        showToast(data.error || 'Failed to update subscription status', 'error');
+        return;
+      }
+
+      showToast(`Subscription status updated to ${newStatus.toUpperCase()}`, 'success');
+      await fetchUsers();
+    } catch {
+      showToast('Network error updating subscription', 'error');
+    }
+  };
+
   return (
     <div>
       <div style={{ marginBottom: 'var(--space-2xl)' }}>
@@ -42,7 +94,7 @@ export default function AdminUsersPage() {
           Registered Member Directory
         </h1>
         <p style={{ color: 'var(--color-text-secondary)', fontSize: '0.95rem' }}>
-          View platform members, verify assigned security roles, and monitor subscription status.
+          View platform members, assign security roles, and manage subscription access levels.
         </p>
       </div>
 
@@ -68,18 +120,19 @@ export default function AdminUsersPage() {
                 <th>Plan Tier</th>
                 <th>Subscription Status</th>
                 <th>Joined Date</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={5} style={{ textAlign: 'center', padding: '2.5rem', color: 'var(--color-text-muted)' }}>
+                  <td colSpan={6} style={{ textAlign: 'center', padding: '2.5rem', color: 'var(--color-text-muted)' }}>
                     Loading user directory...
                   </td>
                 </tr>
               ) : filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={5} style={{ textAlign: 'center', padding: '3rem', color: 'var(--color-text-muted)' }}>
+                  <td colSpan={6} style={{ textAlign: 'center', padding: '3rem', color: 'var(--color-text-muted)' }}>
                     No members found matching query.
                   </td>
                 </tr>
@@ -113,6 +166,26 @@ export default function AdminUsersPage() {
                     </td>
                     <td style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)' }}>
                       {new Date(u.created_at).toLocaleDateString('en-IN', { month: 'short', day: 'numeric', year: 'numeric' })}
+                    </td>
+                    <td>
+                      <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          style={{ fontSize: '0.75rem', padding: '0.25rem 0.6rem' }}
+                          onClick={() => handleUpdateRole(u.id, u.role, u.full_name)}
+                        >
+                          {u.role === 'admin' ? 'Demote to User' : 'Promote to Admin'}
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          style={{ fontSize: '0.75rem', padding: '0.25rem 0.6rem' }}
+                          onClick={() => handleUpdateSubscription(u.id, u.subscription_status, u.full_name)}
+                        >
+                          {u.subscription_status === 'active' ? 'Set Inactive' : 'Activate Access'}
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))

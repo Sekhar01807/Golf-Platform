@@ -392,7 +392,7 @@ git commit -m "chore(cleanup): remove AGENTS.md scaffolding artifact"
 ### Commit 4: Documentation & Test Badge Synchronization
 ```bash
 git add README.md
-git commit -m "docs(architecture): update test count badge to 94 tests, document Zod and rate limiting"
+git commit -m "docs(architecture): update test count badge to 97 tests, document Zod and rate limiting"
 ```
 
 ---
