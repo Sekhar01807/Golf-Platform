@@ -652,7 +652,23 @@ REVOKE ALL ON FUNCTION public.fail_stripe_event(TEXT) FROM PUBLIC, anon, authent
 GRANT EXECUTE ON FUNCTION public.fail_stripe_event(TEXT) TO service_role;
 
 -- ═══════════════════════════════════════════════════
--- 11. ROW LEVEL SECURITY (RLS) POLICIES
+-- 11. HELPER: SAFE ADMIN CHECK (PREVENTS RLS RECURSION)
+-- ═══════════════════════════════════════════════════
+CREATE OR REPLACE FUNCTION public.is_admin()
+RETURNS BOOLEAN AS $$
+BEGIN
+  RETURN EXISTS (
+    SELECT 1 FROM public.users
+    WHERE id = auth.uid() AND role = 'admin'
+  );
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
+
+REVOKE ALL ON FUNCTION public.is_admin() FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.is_admin() TO authenticated, service_role;
+
+-- ═══════════════════════════════════════════════════
+-- 12. ROW LEVEL SECURITY (RLS) POLICIES
 -- ═══════════════════════════════════════════════════
 
 ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
@@ -668,52 +684,36 @@ ALTER TABLE public.stripe_events ENABLE ROW LEVEL SECURITY;
 -- Users
 CREATE POLICY "Users can read own profile" ON public.users FOR SELECT USING (auth.uid() = id);
 CREATE POLICY "Users can update own profile" ON public.users FOR UPDATE USING (auth.uid() = id);
-CREATE POLICY "Admin full access users" ON public.users FOR ALL USING (
-  EXISTS (SELECT 1 FROM public.users WHERE id = auth.uid() AND role = 'admin')
-);
+CREATE POLICY "Admin full access users" ON public.users FOR ALL USING (public.is_admin());
 
 -- Charities
 CREATE POLICY "Public read charities" ON public.charities FOR SELECT USING (true);
-CREATE POLICY "Admin manage charities" ON public.charities FOR ALL USING (
-  EXISTS (SELECT 1 FROM public.users WHERE id = auth.uid() AND role = 'admin')
-);
+CREATE POLICY "Admin manage charities" ON public.charities FOR ALL USING (public.is_admin());
 
 -- Golf Scores (Direct client INSERT is disabled; score submissions must go through the transactional add_golf_score RPC)
 CREATE POLICY "Users read own scores" ON public.golf_scores FOR SELECT USING (auth.uid() = user_id);
 CREATE POLICY "Users delete own scores" ON public.golf_scores FOR DELETE USING (auth.uid() = user_id);
-CREATE POLICY "Admin full access scores" ON public.golf_scores FOR ALL USING (
-  EXISTS (SELECT 1 FROM public.users WHERE id = auth.uid() AND role = 'admin')
-);
+CREATE POLICY "Admin full access scores" ON public.golf_scores FOR ALL USING (public.is_admin());
 
 -- Draws (published and locked are public read)
 CREATE POLICY "Public read published draws" ON public.draws FOR SELECT USING (status IN ('published', 'locked'));
-CREATE POLICY "Admin manage draws" ON public.draws FOR ALL USING (
-  EXISTS (SELECT 1 FROM public.users WHERE id = auth.uid() AND role = 'admin')
-);
+CREATE POLICY "Admin manage draws" ON public.draws FOR ALL USING (public.is_admin());
 
 -- Draw Entries
 CREATE POLICY "Users read own entries" ON public.draw_entries FOR SELECT USING (auth.uid() = user_id);
-CREATE POLICY "Admin manage entries" ON public.draw_entries FOR ALL USING (
-  EXISTS (SELECT 1 FROM public.users WHERE id = auth.uid() AND role = 'admin')
-);
+CREATE POLICY "Admin manage entries" ON public.draw_entries FOR ALL USING (public.is_admin());
 
 -- Draw Winners
 CREATE POLICY "Users read own winnings" ON public.draw_winners FOR SELECT USING (auth.uid() = user_id);
 CREATE POLICY "Users update own proof" ON public.draw_winners FOR UPDATE USING (auth.uid() = user_id);
-CREATE POLICY "Admin manage winners" ON public.draw_winners FOR ALL USING (
-  EXISTS (SELECT 1 FROM public.users WHERE id = auth.uid() AND role = 'admin')
-);
+CREATE POLICY "Admin manage winners" ON public.draw_winners FOR ALL USING (public.is_admin());
 
 -- Independent Donations (Immutable financial ledger; read-only for users & admins, mutations restricted to service_role)
 CREATE POLICY "Users read own donations" ON public.independent_donations FOR SELECT USING (auth.uid() = user_id);
-CREATE POLICY "Admin read donations" ON public.independent_donations FOR SELECT USING (
-  EXISTS (SELECT 1 FROM public.users WHERE id = auth.uid() AND role = 'admin')
-);
+CREATE POLICY "Admin read donations" ON public.independent_donations FOR SELECT USING (public.is_admin());
 
 -- Audit Logs (Admin only)
-CREATE POLICY "Admin read audit logs" ON public.audit_logs FOR SELECT USING (
-  EXISTS (SELECT 1 FROM public.users WHERE id = auth.uid() AND role = 'admin')
-);
+CREATE POLICY "Admin read audit logs" ON public.audit_logs FOR SELECT USING (public.is_admin());
 
 -- Stripe Events (Service role only, no client access)
 -- Default deny for non-service-role callers

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getStripe } from '@/lib/stripe';
 import { createClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/admin';
 import { validateCheckoutInput } from '@/lib/validations';
 import { getAppUrl, getStripePriceId } from '@/lib/env';
 import { enforceRateLimit } from '@/lib/rate-limit';
@@ -29,19 +30,59 @@ export async function POST(request: NextRequest) {
 
     const { plan } = validation.data;
     const stripe = getStripe();
+    const adminDb = createAdminClient();
 
     // 1. Atomic Concurrency Lock: Checks active status & claims lock under row-lock to prevent race conditions
     const { error: lockError } = await supabase.rpc('claim_checkout_lock', { p_user_id: user.id });
     if (lockError) {
-      const isAlreadyActive = lockError.message.toLowerCase().includes('already has an active subscription');
-      return NextResponse.json(
-        { error: lockError.message },
-        { status: isAlreadyActive ? 400 : 409 }
-      );
+      const isAlreadyActive = lockError.message?.toLowerCase().includes('already has an active subscription');
+      const isAlreadyInProgress = lockError.message?.toLowerCase().includes('already in progress');
+
+      if (isAlreadyActive) {
+        return NextResponse.json(
+          { error: 'You already have an active subscription. Please manage your plan in the Billing Portal.' },
+          { status: 400 }
+        );
+      }
+
+      if (isAlreadyInProgress) {
+        return NextResponse.json(
+          { error: 'A checkout session is already in progress. Please complete your payment or try again in a few minutes.' },
+          { status: 409 }
+        );
+      }
+
+      // Fallback: direct table check via service role if RPC is not provisioned or schema cache not reloaded
+      const { data: userProfile, error: profileErr } = await adminDb
+        .from('users')
+        .select('subscription_status, checkout_lock_until')
+        .eq('id', user.id)
+        .single();
+
+      if (!profileErr && userProfile) {
+        if (userProfile.subscription_status === 'active') {
+          return NextResponse.json(
+            { error: 'You already have an active subscription. Please manage your plan in the Billing Portal.' },
+            { status: 400 }
+          );
+        }
+        if (userProfile.checkout_lock_until && new Date(userProfile.checkout_lock_until) > new Date()) {
+          return NextResponse.json(
+            { error: 'A checkout session is already in progress. Please complete your payment or try again in a few minutes.' },
+            { status: 409 }
+          );
+        }
+        // Claim lock via direct update
+        const lockExpiry = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+        await adminDb.from('users').update({ checkout_lock_until: lockExpiry }).eq('id', user.id);
+      } else if (profileErr && !isAlreadyInProgress && !isAlreadyActive) {
+        // Log warning and proceed gracefully
+        console.warn('Checkout lock check bypassed due to profile query issue:', profileErr.message);
+      }
     }
 
     // 2. Fetch user profile for customer binding
-    const { data: profile } = await supabase
+    const { data: profile } = await adminDb
       .from('users')
       .select('stripe_customer_id, email, full_name')
       .eq('id', user.id)
@@ -57,7 +98,7 @@ export async function POST(request: NextRequest) {
       });
       customerId = customer.id;
 
-      await supabase.from('users').update({
+      await adminDb.from('users').update({
         stripe_customer_id: customerId,
       }).eq('id', user.id);
     }
@@ -90,6 +131,17 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ url: session.url });
   } catch (error: any) {
+    // Release checkout lock on session creation failure so the user is not locked out
+    try {
+      const supabase = await createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user?.id) {
+        await supabase.from('users').update({ checkout_lock_until: null }).eq('id', user.id);
+      }
+    } catch {
+      // Best-effort cleanup
+    }
+
     return NextResponse.json({ error: error?.message || 'Failed to create checkout session' }, { status: 500 });
   }
 }
