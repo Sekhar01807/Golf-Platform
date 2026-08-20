@@ -1,103 +1,180 @@
 import { createClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/admin';
 import Link from 'next/link';
-import { ScorecardIcon, HeartIcon, TicketIcon } from '@/components/Icons/Icons';
+import { ScorecardIcon, HeartIcon, TicketIcon, CrownIcon } from '@/components/Icons/Icons';
+import { getMembershipDetails } from '@/lib/utils/subscription';
 import styles from './dashboard.module.css';
 
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 export const metadata = {
   title: 'Dashboard — GolfForGood',
 };
 
-export default async function DashboardOverview() {
+export default async function DashboardOverview({
+  searchParams,
+}: {
+  searchParams?: Promise<{ subscription?: string }> | { subscription?: string };
+}) {
+  const resolvedParams = searchParams ? await Promise.resolve(searchParams) : undefined;
+  const isSubscriptionSuccess = resolvedParams?.subscription === 'success';
+
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
 
-  let subscriptionStatus = 'inactive';
   let scoresCount = 0;
   let totalWon = 0;
   let userName = 'Golfer';
+  let recentScores: any[] = [];
+  let membership = getMembershipDetails({
+    status: 'inactive',
+    plan: null,
+    endDate: null,
+  });
 
   if (user) {
-    // Fetch user profile
-    const { data: profile } = await supabase
+    const adminDb = createAdminClient();
+
+    // Fetch user profile with live subscription fields
+    let { data: profile, error: profileErr } = await supabase
       .from('users')
-      .select('full_name, subscription_status')
+      .select('full_name, subscription_status, subscription_plan, subscription_end_date')
       .eq('id', user.id)
       .single();
 
-    if (profile) {
-      userName = profile.full_name || user.email?.split('@')[0] || 'Golfer';
-      subscriptionStatus = profile.subscription_status || 'inactive';
+    if (profileErr || !profile) {
+      const { data: adminProfile } = await adminDb
+        .from('users')
+        .select('full_name, subscription_status, subscription_plan, subscription_end_date')
+        .eq('id', user.id)
+        .single();
+      profile = adminProfile;
     }
 
-    // Count scores
-    const { count } = await supabase
+    if (profile) {
+      userName = profile.full_name || user.email?.split('@')[0] || 'Golfer';
+      membership = getMembershipDetails({
+        status: profile.subscription_status || 'inactive',
+        plan: profile.subscription_plan || null,
+        endDate: profile.subscription_end_date || null,
+      });
+    }
+
+    // Count scores with admin fallback
+    const { count, error: countErr } = await supabase
       .from('golf_scores')
       .select('*', { count: 'exact', head: true })
       .eq('user_id', user.id);
 
-    scoresCount = count || 0;
+    if (!countErr && count !== null && count !== undefined) {
+      scoresCount = count;
+    } else {
+      const { count: adminCount } = await adminDb
+        .from('golf_scores')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', user.id);
+      scoresCount = adminCount || 0;
+    }
 
-    // Sum winnings
-    const { data: winnings } = await supabase
+    // Sum winnings with admin fallback
+    const { data: winnings, error: winErr } = await supabase
       .from('draw_winners')
       .select('prize_amount')
       .eq('user_id', user.id);
 
-    totalWon = winnings?.reduce((sum, w) => sum + Number(w.prize_amount), 0) || 0;
-  }
+    if (!winErr && winnings) {
+      totalWon = winnings.reduce((sum, w) => sum + Number(w.prize_amount || 0), 0);
+    } else {
+      const { data: adminWinnings } = await adminDb
+        .from('draw_winners')
+        .select('prize_amount')
+        .eq('user_id', user.id);
+      totalWon = adminWinnings?.reduce((sum, w) => sum + Number(w.prize_amount || 0), 0) || 0;
+    }
 
-  // Fetch recent scores
-  const { data: recentScores } = user
-    ? await supabase
+    // Fetch recent scores with admin fallback
+    const { data: scores, error: scoresErr } = await supabase
+      .from('golf_scores')
+      .select('score, date_played')
+      .eq('user_id', user.id)
+      .order('date_played', { ascending: false })
+      .limit(5);
+
+    if (!scoresErr && scores) {
+      recentScores = scores;
+    } else {
+      const { data: adminScores } = await adminDb
         .from('golf_scores')
         .select('score, date_played')
         .eq('user_id', user.id)
         .order('date_played', { ascending: false })
-        .limit(5)
-    : { data: [] };
-
-  // Next draw
-  const { data: nextDraw } = await supabase
-    .from('draws')
-    .select('draw_month, status')
-    .order('draw_month', { ascending: false })
-    .limit(1);
-
-  const nextDrawLabel = nextDraw?.[0]
-    ? new Date(nextDraw[0].draw_month).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })
-    : 'Upcoming';
+        .limit(5);
+      recentScores = adminScores || [];
+    }
+  }
 
   const stats = [
     {
-      label: 'Membership',
-      value: subscriptionStatus === 'active' ? 'Active' : subscriptionStatus.charAt(0).toUpperCase() + subscriptionStatus.slice(1),
-      badge: subscriptionStatus === 'active' ? 'badge-active' : 'badge-inactive',
+      label: 'Membership Tier',
+      value: membership.isPremium ? (membership.label.includes('Annual') ? 'Annual Pass' : 'Monthly Pass') : 'Free Golfer',
+      badgeClass: membership.badgeClass,
+      badgeText: membership.isPremium ? 'Active Premium' : membership.label,
+      badgeStyle: membership.badgeStyle,
     },
     {
-      label: 'Scores Logged',
+      label: 'Active 18-Hole Scores',
       value: `${scoresCount} / 5`,
-      badge: scoresCount >= 5 ? 'badge-active' : 'badge-accent',
+      badgeClass: scoresCount >= 5 ? 'badge-active' : 'badge-pending',
+      badgeText: scoresCount >= 5 ? 'Draw Ready' : 'Need 5 to Enter',
     },
     {
-      label: 'Next Prize Draw',
-      value: nextDrawLabel,
-      badge: 'badge-pending',
+      label: 'Monthly Draw Status',
+      value: membership.isPremium && scoresCount >= 5 ? 'Eligible' : 'Action Required',
+      badgeClass: membership.isPremium && scoresCount >= 5 ? 'badge-active' : 'badge-inactive',
+      badgeText: membership.isPremium ? (scoresCount >= 5 ? 'Draw Ready' : 'Log Scores') : 'Subscribe',
     },
     {
-      label: 'Total Winnings',
+      label: 'Career Prize Winnings',
       value: `₹${totalWon.toLocaleString('en-IN')}`,
-      badge: totalWon > 0 ? 'badge-active' : 'badge-primary',
+      badgeClass: totalWon > 0 ? 'badge-active' : 'badge-inactive',
+      badgeText: totalWon > 0 ? 'Won' : 'No Claims',
     },
   ];
 
   return (
     <div>
+      {isSubscriptionSuccess && (
+        <div
+          style={{
+            padding: '1rem 1.25rem',
+            backgroundColor: 'rgba(46, 125, 90, 0.12)',
+            border: '1px solid var(--color-success)',
+            borderRadius: 'var(--radius-md)',
+            marginBottom: 'var(--space-xl)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.75rem',
+            color: 'var(--color-text-primary)',
+            fontSize: '0.95rem',
+            fontWeight: 500,
+          }}
+        >
+          <CrownIcon size={20} color="var(--color-success)" />
+          <span>Welcome to GolfForGood Premium! Your membership is active. You can now log your Stableford rounds and participate in the monthly prize draws.</span>
+        </div>
+      )}
+
       <div className={styles.pageHeader}>
-        <h1 className={styles.pageTitle}>Good day, {userName}</h1>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+          <h1 className={styles.pageTitle}>Good day, {userName}</h1>
+          <span className="badge" style={membership.badgeStyle}>
+            {membership.isPremium && <CrownIcon size={14} color="#D4A84F" style={{ marginRight: '4px', verticalAlign: 'middle' }} />}
+            {membership.label}
+          </span>
+        </div>
         <p className={styles.pageSubtitle}>Track your golf performance and your charitable contributions.</p>
       </div>
 
@@ -107,9 +184,9 @@ export default async function DashboardOverview() {
           <div key={i} className="card">
             <div className="stat-label">{stat.label}</div>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 'var(--space-sm)' }}>
-              <span className="stat-value" style={{ fontSize: '1.6rem' }}>{stat.value}</span>
-              <span className={`badge ${stat.badge}`}>
-                {stat.badge === 'badge-active' ? 'Active' : stat.badge === 'badge-pending' ? 'Eligible' : 'Info'}
+              <span className="stat-value" style={{ fontSize: '1.45rem' }}>{stat.value}</span>
+              <span className={`badge ${stat.badgeClass}`} style={stat.badgeStyle}>
+                {stat.badgeText}
               </span>
             </div>
           </div>
@@ -150,14 +227,14 @@ export default async function DashboardOverview() {
                       {s.score} pts
                     </td>
                     <td>
-                      <span className="badge badge-active">Active in Draw</span>
+                      <span className="badge badge-active">Verified</span>
                     </td>
                   </tr>
                 ))
               ) : (
                 <tr>
-                  <td colSpan={3} style={{ textAlign: 'center', padding: '2.5rem', color: 'var(--color-text-muted)' }}>
-                    No scores recorded yet. Click &quot;Enter New Score&quot; to log your first round.
+                  <td colSpan={3} style={{ textAlign: 'center', color: 'var(--color-text-muted)', padding: 'var(--space-xl)' }}>
+                    No scores logged yet. <Link href="/dashboard/scores" style={{ color: 'var(--color-primary)', fontWeight: 600 }}>Enter your first round</Link>
                   </td>
                 </tr>
               )}

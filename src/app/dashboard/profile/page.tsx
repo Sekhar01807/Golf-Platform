@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { useToast } from '@/components/Toast/Toast';
 import {
@@ -10,7 +11,11 @@ import {
   HeartIcon,
   TicketIcon,
   ShieldIcon,
+  EditIcon,
+  CheckCircleIcon,
+  CrownIcon,
 } from '@/components/Icons/Icons';
+import { getMembershipDetails, ComputedMembership } from '@/lib/utils/subscription';
 
 interface GolfProfileData {
   phone: string;
@@ -32,6 +37,7 @@ interface ScoreRecord {
 }
 
 export default function ProfilePage() {
+  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [isEditing, setIsEditing] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -40,8 +46,14 @@ export default function ProfilePage() {
   const [fullName, setFullName] = useState('Golfer');
   const [email, setEmail] = useState('');
   const [createdAt, setCreatedAt] = useState('');
-  const [subscriptionStatus, setSubscriptionStatus] = useState('inactive');
-  const [subscriptionPlan, setSubscriptionPlan] = useState<string | null>(null);
+  const [membership, setMembership] = useState<ComputedMembership>({
+    isPremium: false,
+    label: 'Free Golfer',
+    badgeClass: 'badge-inactive',
+    badgeStyle: {},
+    color: '#64748B',
+    subLabel: 'Free Account',
+  });
 
   // 2. Golf Profile (Domain-specific)
   const [golfProfile, setGolfProfile] = useState<GolfProfileData>({
@@ -72,81 +84,70 @@ export default function ProfilePage() {
   const fetchProfileData = async () => {
     try {
       setLoading(true);
-      const { data: { user }, error: authError } = await supabase.auth.getUser();
-
-      if (authError || !user) {
-        showToast('Please sign in to view your profile', 'warning');
+      const res = await fetch('/api/profile');
+      if (!res.ok) {
+        if (res.status === 401) {
+          showToast('Please sign in to view your profile', 'warning');
+        } else {
+          showToast('Failed to load profile details', 'error');
+        }
         return;
       }
 
-      const emailAddress = user.email || '';
-      setEmail(emailAddress);
-      const emailPrefix = emailAddress.split('@')[0] || 'Golfer';
+      const data = await res.json();
+      const user = data.user;
+      const profile = data.profile;
 
-      // Fetch public.users profile
-      const { data: profile } = await supabase
-        .from('users')
-        .select('full_name, subscription_status, subscription_plan, selected_charity_id, charity_contribution_percentage, created_at')
-        .eq('id', user.id)
-        .single();
-
-      if (profile) {
-        const name = profile.full_name || user.user_metadata?.full_name || emailPrefix;
+      if (user) {
+        setEmail(user.email || '');
+        const name = profile?.full_name || user.metadata?.full_name || user.email?.split('@')[0] || 'Golfer';
         setFullName(name);
-        setSubscriptionStatus(profile.subscription_status || 'inactive');
-        setSubscriptionPlan(profile.subscription_plan || null);
-        setCharityPercentage(profile.charity_contribution_percentage || 10);
-        if (profile.created_at) {
-          setCreatedAt(new Date(profile.created_at).toLocaleDateString('en-US', {
-            year: 'numeric',
-            month: 'long',
-            day: 'numeric',
+        setCharityPercentage(profile?.charity_contribution_percentage || 10);
+
+        if (data.charityName) {
+          setCharityName(data.charityName);
+        }
+
+        const computed = getMembershipDetails({
+          status: profile?.subscription_status || 'inactive',
+          plan: profile?.subscription_plan || null,
+          endDate: profile?.subscription_end_date || null,
+        });
+        setMembership(computed);
+
+        if (profile?.created_at) {
+          setCreatedAt(
+            new Date(profile.created_at).toLocaleDateString('en-US', {
+              year: 'numeric',
+              month: 'long',
+              day: 'numeric',
+            })
+          );
+        }
+
+        if (user.metadata?.golf_profile) {
+          setGolfProfile({
+            phone: user.metadata.golf_profile.phone || user.metadata?.phone || '',
+            location: user.metadata.golf_profile.location || '',
+            handicapIndex: user.metadata.golf_profile.handicapIndex || '',
+            playingLevel: user.metadata.golf_profile.playingLevel || '',
+            preferredTee: user.metadata.golf_profile.preferredTee || '',
+            homeCourse: user.metadata.golf_profile.homeCourse || '',
+            favoriteCourse: user.metadata.golf_profile.favoriteCourse || '',
+            yearsPlaying: user.metadata.golf_profile.yearsPlaying || '',
+            preferredFormat: user.metadata.golf_profile.preferredFormat || '',
+            averageScoreManual: user.metadata.golf_profile.averageScoreManual || '',
+          });
+        } else {
+          setGolfProfile((prev) => ({
+            ...prev,
+            phone: user.metadata?.phone || '',
           }));
         }
-
-        // Fetch selected charity if set
-        if (profile.selected_charity_id) {
-          const { data: charity } = await supabase
-            .from('charities')
-            .select('name')
-            .eq('id', profile.selected_charity_id)
-            .single();
-          if (charity) setCharityName(charity.name);
-        }
-      } else {
-        setFullName(emailPrefix);
       }
 
-      // Load user metadata if filled by user
-      if (user.user_metadata?.golf_profile) {
-        setGolfProfile({
-          phone: user.user_metadata.golf_profile.phone || user.user_metadata?.phone || '',
-          location: user.user_metadata.golf_profile.location || '',
-          handicapIndex: user.user_metadata.golf_profile.handicapIndex || '',
-          playingLevel: user.user_metadata.golf_profile.playingLevel || '',
-          preferredTee: user.user_metadata.golf_profile.preferredTee || '',
-          homeCourse: user.user_metadata.golf_profile.homeCourse || '',
-          favoriteCourse: user.user_metadata.golf_profile.favoriteCourse || '',
-          yearsPlaying: user.user_metadata.golf_profile.yearsPlaying || '',
-          preferredFormat: user.user_metadata.golf_profile.preferredFormat || '',
-          averageScoreManual: user.user_metadata.golf_profile.averageScoreManual || '',
-        });
-      } else {
-        setGolfProfile((prev) => ({
-          ...prev,
-          phone: user.user_metadata?.phone || '',
-        }));
-      }
-
-      // Fetch actual scores
-      const { data: scoreRecords } = await supabase
-        .from('golf_scores')
-        .select('id, score, date_played')
-        .eq('user_id', user.id)
-        .order('date_played', { ascending: false });
-
-      if (scoreRecords) {
-        setScores(scoreRecords);
+      if (data.scores) {
+        setScores(data.scores);
       }
     } catch {
       showToast('Failed to load profile details', 'error');
@@ -159,29 +160,35 @@ export default function ProfilePage() {
     e.preventDefault();
     try {
       setSaving(true);
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-
-      // Update database profile
-      await supabase
-        .from('users')
-        .update({
-          full_name: fullName.trim(),
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', user.id);
-
-      // Save user metadata
-      await supabase.auth.updateUser({
-        data: {
-          full_name: fullName.trim(),
+      const res = await fetch('/api/profile', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fullName: fullName.trim(),
           phone: golfProfile.phone.trim(),
-          golf_profile: golfProfile,
-        },
+          golfProfile,
+        }),
       });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        showToast(data.error || 'Failed to save profile changes', 'error');
+        return;
+      }
+
+      // Dispatch global event so sidebar and topbar immediately reflect updated name & initial
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(
+          new CustomEvent('profile-updated', {
+            detail: { fullName: fullName.trim() },
+          })
+        );
+      }
 
       showToast('Profile details updated successfully!', 'success');
       setIsEditing(false);
+      await fetchProfileData();
+      router.refresh();
     } catch {
       showToast('Failed to save profile changes', 'error');
     } finally {
@@ -216,15 +223,19 @@ export default function ProfilePage() {
                 width: '80px',
                 height: '80px',
                 borderRadius: '50%',
-                background: 'linear-gradient(135deg, #214E34 0%, #2D6846 100%)',
+                background: membership.isPremium
+                  ? 'linear-gradient(135deg, #1E6B42 0%, #164E30 100%)'
+                  : 'linear-gradient(135deg, #334155 0%, #1E293B 100%)',
                 color: '#FFFFFF',
                 fontSize: '2.2rem',
                 fontWeight: 700,
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                boxShadow: '0 4px 16px rgba(33, 78, 52, 0.3)',
-                border: '3px solid #FFFFFF',
+                boxShadow: membership.isPremium
+                  ? '0 4px 16px rgba(30, 107, 66, 0.35)'
+                  : '0 4px 12px rgba(0, 0, 0, 0.15)',
+                border: membership.isPremium ? '3px solid #D4A84F' : '3px solid #FFFFFF',
                 flexShrink: 0,
               }}
             >
@@ -236,12 +247,13 @@ export default function ProfilePage() {
                 <h2 style={{ fontSize: '1.6rem', fontWeight: 700, color: 'var(--color-text-primary)', margin: 0 }}>
                   {fullName}
                 </h2>
-                <span className={`badge ${subscriptionStatus === 'active' ? 'badge-active' : 'badge-inactive'}`}>
-                  {subscriptionStatus === 'active' ? `Active ${subscriptionPlan || 'Member'}` : 'Member'}
+                <span className="badge" style={membership.badgeStyle}>
+                  {membership.isPremium && <CrownIcon size={14} color="#D4A84F" style={{ marginRight: '4px', verticalAlign: 'middle' }} />}
+                  {membership.label}
                 </span>
               </div>
 
-              <div style={{ fontSize: '0.92rem', color: '#2D6846', fontWeight: 600, marginTop: '4px' }}>
+              <div style={{ fontSize: '0.92rem', color: membership.isPremium ? '#1E6B42' : 'var(--color-text-secondary)', fontWeight: 600, marginTop: '4px' }}>
                 {golfProfile.playingLevel ? `${golfProfile.playingLevel} Golfer` : 'Golfer'} 
                 {golfProfile.handicapIndex ? ` • Handicap ${golfProfile.handicapIndex}` : ''}
               </div>
@@ -259,9 +271,10 @@ export default function ProfilePage() {
             type="button"
             className="btn btn-secondary btn-sm"
             onClick={() => setIsEditing(!isEditing)}
-            style={{ fontWeight: 600 }}
+            style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.4rem' }}
           >
-            {isEditing ? 'Close Editor' : 'Edit Profile'}
+            <EditIcon size={14} />
+            <span>{isEditing ? 'Close Editor' : 'Edit Profile'}</span>
           </button>
         </div>
 
@@ -432,9 +445,10 @@ export default function ProfilePage() {
               type="button"
               className="btn btn-secondary btn-sm"
               onClick={() => setIsEditing(true)}
-              style={{ fontSize: '0.8rem' }}
+              style={{ fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}
             >
-              Edit Details
+              <EditIcon size={13} />
+              <span>Edit Details</span>
             </button>
           )}
         </div>
@@ -498,7 +512,7 @@ export default function ProfilePage() {
             <span style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--color-text-muted)', fontWeight: 600, display: 'block', marginBottom: '4px' }}>
               Average Score
             </span>
-            <span style={{ fontSize: '1.15rem', fontWeight: 600, color: '#2D6846' }}>
+            <span style={{ fontSize: '1.15rem', fontWeight: 600, color: '#1E6B42' }}>
               {avgScore !== '—' ? `${avgScore} Pts` : 'No rounds logged yet'}
             </span>
           </div>
@@ -539,7 +553,7 @@ export default function ProfilePage() {
           </div>
 
           <div className="stat-card" style={{ padding: '1.25rem' }}>
-            <div className="stat-value" style={{ fontSize: '1.8rem', color: '#2D6846' }}>{avgScore}</div>
+            <div className="stat-value" style={{ fontSize: '1.8rem', color: '#1E6B42' }}>{avgScore}</div>
             <div className="stat-label">Average Score</div>
           </div>
 
@@ -613,7 +627,7 @@ export default function ProfilePage() {
                 Monthly Prize Draw Participation
               </div>
               <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
-                {subscriptionStatus === 'active' ? 'Active entry linked to your verified 5-round score average' : 'Subscribe to enter monthly skill prize draws'}
+                {membership.isPremium ? 'Active premium entry linked to your verified 5-round score average' : 'Subscribe to enter monthly skill prize draws'}
               </div>
             </div>
             <Link href="/dashboard/draws" style={{ fontSize: '0.825rem', color: 'var(--color-primary)', fontWeight: 600 }}>
@@ -656,27 +670,30 @@ export default function ProfilePage() {
         </h3>
 
         <div className="grid grid-2" style={{ gap: '1rem' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.85rem 1rem', background: 'var(--color-bg-surface)', borderRadius: '8px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.85rem 1rem', background: 'var(--color-bg-surface)', borderRadius: '8px' }}>
             <span style={{ color: 'var(--color-text-secondary)', fontSize: '0.875rem' }}>Email Verification</span>
-            <span style={{ color: '#2D6846', fontWeight: 600, fontSize: '0.875rem' }}>Verified</span>
+            <span style={{ color: '#1E6B42', fontWeight: 600, fontSize: '0.875rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+              <CheckCircleIcon size={16} color="#1E6B42" />
+              Verified
+            </span>
           </div>
 
-          <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.85rem 1rem', background: 'var(--color-bg-surface)', borderRadius: '8px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.85rem 1rem', background: 'var(--color-bg-surface)', borderRadius: '8px' }}>
             <span style={{ color: 'var(--color-text-secondary)', fontSize: '0.875rem' }}>Phone Verification</span>
-            <span style={{ color: golfProfile.phone ? '#2D6846' : 'var(--color-text-muted)', fontWeight: 600, fontSize: '0.875rem' }}>
+            <span style={{ color: golfProfile.phone ? '#1E6B42' : 'var(--color-text-muted)', fontWeight: 600, fontSize: '0.875rem' }}>
               {golfProfile.phone ? 'Linked' : 'Unlinked'}
             </span>
           </div>
 
-          <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.85rem 1rem', background: 'var(--color-bg-surface)', borderRadius: '8px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.85rem 1rem', background: 'var(--color-bg-surface)', borderRadius: '8px' }}>
             <span style={{ color: 'var(--color-text-secondary)', fontSize: '0.875rem' }}>Account Creation Date</span>
             <span style={{ color: 'var(--color-text-primary)', fontWeight: 600, fontSize: '0.875rem' }}>{createdAt || 'Recent'}</span>
           </div>
 
-          <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.85rem 1rem', background: 'var(--color-bg-surface)', borderRadius: '8px' }}>
-            <span style={{ color: 'var(--color-text-secondary)', fontSize: '0.875rem' }}>Account Status</span>
-            <span style={{ color: subscriptionStatus === 'active' ? '#2D6846' : 'var(--color-text-muted)', fontWeight: 600, fontSize: '0.875rem' }}>
-              {subscriptionStatus === 'active' ? 'Active Member' : 'Standard Golfer'}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.85rem 1rem', background: 'var(--color-bg-surface)', borderRadius: '8px' }}>
+            <span style={{ color: 'var(--color-text-secondary)', fontSize: '0.875rem' }}>Membership Status</span>
+            <span className="badge" style={{ ...membership.badgeStyle, fontSize: '0.75rem', padding: '0.25rem 0.6rem' }}>
+              {membership.label}
             </span>
           </div>
         </div>

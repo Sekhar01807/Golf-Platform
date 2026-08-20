@@ -16,6 +16,7 @@ import {
   SettingsIcon,
   LogoutIcon,
 } from '@/components/Icons/Icons';
+import { getMembershipDetails, ComputedMembership } from '@/lib/utils/subscription';
 import styles from './dashboard.module.css';
 
 const navItems = [
@@ -35,25 +36,64 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [userName, setUserName] = useState('Golfer');
   const [userEmail, setUserEmail] = useState('');
   const [userInitial, setUserInitial] = useState('G');
+  const [membership, setMembership] = useState<ComputedMembership>({
+    isPremium: false,
+    label: 'Free Golfer',
+    badgeClass: 'badge-inactive',
+    badgeStyle: {},
+    color: '#94A3B8',
+    subLabel: 'Free Account',
+  });
+
   const popupRef = useRef<HTMLDivElement>(null);
   const supabase = createClient();
 
   useEffect(() => {
     async function loadUserProfile() {
       try {
+        const res = await fetch('/api/profile');
+        if (res.ok) {
+          const data = await res.json();
+          if (data.user) {
+            setUserEmail(data.user.email || '');
+            const name = data.profile?.full_name || data.user.metadata?.full_name || data.user.email?.split('@')[0] || 'Golfer';
+            setUserName(name);
+            setUserInitial(name.trim().charAt(0).toUpperCase() || 'G');
+
+            if (data.profile) {
+              const computed = getMembershipDetails({
+                status: data.profile.subscription_status || 'inactive',
+                plan: data.profile.subscription_plan || null,
+                endDate: data.profile.subscription_end_date || null,
+              });
+              setMembership(computed);
+            }
+            return;
+          }
+        }
+
         const { data: { user } } = await supabase.auth.getUser();
         if (user) {
           setUserEmail(user.email || '');
           
           const { data: profile } = await supabase
             .from('users')
-            .select('full_name')
+            .select('full_name, subscription_status, subscription_plan, subscription_end_date')
             .eq('id', user.id)
             .single();
 
           const name = profile?.full_name || user.user_metadata?.full_name || user.email?.split('@')[0] || 'Golfer';
           setUserName(name);
           setUserInitial(name.trim().charAt(0).toUpperCase() || 'G');
+
+          if (profile) {
+            const computed = getMembershipDetails({
+              status: profile.subscription_status || 'inactive',
+              plan: profile.subscription_plan || null,
+              endDate: profile.subscription_end_date || null,
+            });
+            setMembership(computed);
+          }
         }
       } catch {
         // Fallback default
@@ -61,7 +101,22 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     }
 
     loadUserProfile();
-  }, [supabase]);
+
+    const handleProfileUpdated = (e: any) => {
+      if (e?.detail?.fullName) {
+        setUserName(e.detail.fullName);
+        setUserInitial(e.detail.fullName.trim().charAt(0).toUpperCase() || 'G');
+      }
+      loadUserProfile();
+    };
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('profile-updated', handleProfileUpdated);
+      return () => {
+        window.removeEventListener('profile-updated', handleProfileUpdated);
+      };
+    }
+  }, [supabase, pathname]);
 
   // Click outside to close sidebar profile popup
   useEffect(() => {
@@ -88,21 +143,21 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   // Dynamic Page Title
   const getPageMeta = () => {
     if (pathname === '/dashboard') return { title: 'Dashboard Overview', desc: `Welcome back, ${userName}! Track your scores and philanthropic impact.` };
-    if (pathname === '/dashboard/scores') return { title: 'Golf Score Tracking', desc: 'Submit and manage your 18-hole Stableford scores (FIFO 5-round ledger).' };
-    if (pathname === '/dashboard/charity') return { title: 'My Partner Charity', desc: 'Direct 10%–50% of your membership to verified philanthropic initiatives.' };
-    if (pathname === '/dashboard/draws') return { title: 'Monthly Skill Draws', desc: 'Inspect monthly winning number outcomes and prize pool distributions.' };
-    if (pathname === '/dashboard/winnings') return { title: 'Prize Winnings & Verification', desc: 'Submit scorecard verification links and track your payout status.' };
-    if (pathname === '/dashboard/subscription') return { title: 'Membership & Billing', desc: 'Manage your monthly or annual subscription tier via Stripe.' };
-    if (pathname === '/dashboard/profile') return { title: 'Golfer Profile', desc: 'View your golf handicap, performance statistics, and member credentials.' };
-    if (pathname === '/dashboard/settings') return { title: 'Account Settings', desc: 'Manage your preferences, security credentials, notification toggles, and system defaults.' };
-    return { title: 'Member Portal', desc: 'Welcome back to your GolfForGood member portal.' };
+    if (pathname === '/dashboard/scores') return { title: 'Stableford Scores Ledger', desc: 'Submit and verify your latest 18-hole Stableford performance rounds.' };
+    if (pathname === '/dashboard/charity') return { title: 'Charity Giving Allocation', desc: 'Direct 10% to 50% of your membership to verified nonprofit causes.' };
+    if (pathname === '/dashboard/draws') return { title: 'Monthly Skill Draws', desc: 'Inspect monthly winning number draws, prize pools, and matching rules.' };
+    if (pathname === '/dashboard/winnings') return { title: 'Prize Claims & Winnings', desc: 'Review earned prize winnings and submit verified round scorecards.' };
+    if (pathname === '/dashboard/subscription') return { title: 'Membership & Billing', desc: 'Manage your monthly or annual subscription tier and invoices.' };
+    if (pathname === '/dashboard/profile') return { title: 'Golfer Profile', desc: 'View and manage your golf attributes, performance stats, and records.' };
+    if (pathname === '/dashboard/settings') return { title: 'Account Settings', desc: 'Security, notification toggles, preferences, and privacy controls.' };
+    return { title: 'Member Portal', desc: 'Skill-based golf score tracking and philanthropic impact.' };
   };
 
   const pageMeta = getPageMeta();
 
   return (
     <div className={styles.dashLayout}>
-      {/* ── Left Sidebar (NovaCall Style) ── */}
+      {/* ── Left Sidebar Navigation ── */}
       <aside className={`${styles.sidebar} ${sidebarOpen ? styles.open : ''}`}>
         {/* Brand Header */}
         <div className={styles.sidebarHeader}>
@@ -114,9 +169,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           </Link>
         </div>
 
-        {/* Navigation */}
+        {/* Navigation Links */}
         <nav className={styles.sidebarNav}>
-          <div className={styles.navSectionLabel}>Navigation</div>
+          <div className={styles.navSectionLabel}>Member Navigation</div>
           {navItems.map((item) => {
             const isActive = pathname === item.href;
             return (
@@ -133,9 +188,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           })}
         </nav>
 
-        {/* ── User Profile at Bottom of Sidebar (with Downward Dropdown Menu) ── */}
+        {/* ── User Profile at Bottom of Sidebar (with Downward Popup Menu) ── */}
         <div className={styles.sidebarFooter} ref={popupRef}>
-          {/* Profile Trigger Button */}
           <button
             type="button"
             className={`${styles.userProfileTrigger} ${profilePopupOpen ? styles.open : ''}`}
@@ -143,15 +197,27 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             aria-expanded={profilePopupOpen}
             aria-label="User profile options"
           >
-            <div className={styles.userAvatar}>
+            <div
+              className={styles.userAvatar}
+              style={{
+                border: membership.isPremium ? '2px solid #D4A84F' : '2px solid rgba(255,255,255,0.2)',
+                boxShadow: membership.isPremium ? '0 0 10px rgba(212, 168, 79, 0.4)' : 'none',
+              }}
+            >
               {userInitial}
             </div>
             <div className={styles.userInfo}>
               <div className={styles.userName} title={userName}>
                 {userName}
               </div>
-              <div className={styles.userRole}>
-                Active Member
+              <div
+                className={styles.userRole}
+                style={{
+                  color: membership.isPremium ? '#E0BC6D' : membership.color,
+                  fontWeight: membership.isPremium ? 700 : 500,
+                }}
+              >
+                {membership.isPremium ? 'Active Premium' : membership.label}
               </div>
             </div>
             <span className={`${styles.sidebarChevron} ${profilePopupOpen ? styles.rotate : ''}`}>▼</span>
@@ -206,24 +272,36 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           </div>
 
           <div className={styles.topbarRight}>
-            <Link href="/dashboard/scores" className={`${styles.topbarActionBtn} ${styles.topbarActionPrimary}`}>
-              <span>+</span>
-              <span>Submit Score</span>
+            <Link
+              href="/dashboard/scores"
+              className={`${styles.topbarActionBtn} ${styles.topbarActionPrimary}`}
+              onClick={(e) => {
+                if (pathname === '/dashboard/scores') {
+                  e.preventDefault();
+                  const scoreInput = document.getElementById('score-input') as HTMLInputElement | null;
+                  if (scoreInput) {
+                    scoreInput.focus();
+                    scoreInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                  }
+                }
+              }}
+            >
+              <span>+ Submit Score</span>
             </Link>
           </div>
         </header>
 
-        {/* Page Content */}
+        {/* Content Area */}
         <main className={styles.content}>
           {children}
         </main>
       </div>
 
-      {/* Mobile Menu Toggle Button */}
+      {/* Mobile Sidebar Toggle Button */}
       <button
         className={styles.mobileToggle}
         onClick={() => setSidebarOpen(!sidebarOpen)}
-        aria-label="Toggle navigation menu"
+        aria-label="Toggle sidebar navigation"
       >
         {sidebarOpen ? '✕' : '☰'}
       </button>

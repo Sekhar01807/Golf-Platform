@@ -1,10 +1,12 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { useToast } from '@/components/Toast/Toast';
 
 export default function CharityPage() {
+  const router = useRouter();
   const supabase = createClient();
   const { showToast } = useToast();
 
@@ -68,22 +70,24 @@ export default function CharityPage() {
     setSaving(true);
 
     try {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+      const res = await fetch('/api/charity', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          selectedCharityId: selectedCharity,
+          percentage,
+        }),
+      });
 
-      if (user) {
-        const { error } = await supabase
-          .from('users')
-          .update({
-            selected_charity_id: selectedCharity,
-            charity_contribution_percentage: percentage,
-          })
-          .eq('id', user.id);
-
-        if (error) throw error;
-        showToast('Charity preferences updated successfully!', 'success');
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        showToast(data.error || 'Failed to save charity preferences', 'error');
+        return;
       }
+
+      showToast('Charity preferences updated successfully!', 'success');
+      await loadData();
+      router.refresh();
     } catch (err: any) {
       showToast(err?.message || 'Failed to save preferences', 'error');
     } finally {

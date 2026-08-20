@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { createClient } from '@/lib/supabase/client';
+import { useRouter } from 'next/navigation';
 import { useToast } from '@/components/Toast/Toast';
 import { ScorecardIcon } from '@/components/Icons/Icons';
 
@@ -13,6 +13,7 @@ interface ScoreRecord {
 }
 
 export default function ScoresPage() {
+  const router = useRouter();
   const [scores, setScores] = useState<ScoreRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [newScore, setNewScore] = useState('');
@@ -20,7 +21,6 @@ export default function ScoresPage() {
   const [submitting, setSubmitting] = useState(false);
   
   const { showToast } = useToast();
-  const supabase = createClient();
 
   useEffect(() => {
     fetchScores();
@@ -29,27 +29,17 @@ export default function ScoresPage() {
   const fetchScores = async () => {
     try {
       setLoading(true);
-      const { data: { user }, error: authError } = await supabase.auth.getUser();
-
-      if (authError || !user) {
-        showToast('Please sign in to view your scores', 'warning');
+      const res = await fetch('/api/scores');
+      if (!res.ok) {
+        if (res.status === 401) {
+          showToast('Please sign in to view your scores', 'warning');
+        } else {
+          showToast('Failed to load scores from database', 'error');
+        }
         return;
       }
-
-      // Fetch 5 most recent scores ordered by date_played DESC
-      const { data, error } = await supabase
-        .from('golf_scores')
-        .select('id, score, date_played, created_at')
-        .eq('user_id', user.id)
-        .order('date_played', { ascending: false })
-        .limit(5);
-
-      if (error) {
-        showToast('Failed to load scores from database', 'error');
-        return;
-      }
-
-      setScores(data || []);
+      const data = await res.json();
+      setScores(Array.isArray(data) ? data : []);
     } catch {
       showToast('Network error loading scores', 'error');
     } finally {
@@ -73,51 +63,23 @@ export default function ScoresPage() {
 
     setSubmitting(true);
     try {
-      const { data: { user }, error: authError } = await supabase.auth.getUser();
-
-      if (authError || !user) {
-        showToast('Session expired. Please sign in again.', 'error');
-        return;
-      }
-
-      // 1. Try transactional RPC function 'add_golf_score'
-      const { error: rpcError } = await supabase.rpc('add_golf_score', {
-        p_user_id: user.id,
-        p_score: scoreNum,
-        p_date_played: newDate,
+      const res = await fetch('/api/scores', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ score: scoreNum, date_played: newDate }),
       });
 
-      // 2. Fallback to direct insertion & 5-round FIFO management if RPC is not present
-      if (rpcError) {
-        const { error: insertError } = await supabase
-          .from('golf_scores')
-          .insert({
-            user_id: user.id,
-            score: scoreNum,
-            date_played: newDate,
-          });
+      const data = await res.json().catch(() => ({}));
 
-        if (insertError) {
-          showToast(insertError.message || 'Failed to record score', 'error');
-          return;
-        }
-
-        // Maintain 5-round FIFO limit (keep only 5 newest rounds)
-        const { data: allUserScores } = await supabase
-          .from('golf_scores')
-          .select('id, date_played')
-          .eq('user_id', user.id)
-          .order('date_played', { ascending: false });
-
-        if (allUserScores && allUserScores.length > 5) {
-          const excessIds = allUserScores.slice(5).map((s) => s.id);
-          await supabase.from('golf_scores').delete().in('id', excessIds);
-        }
+      if (!res.ok) {
+        showToast(data.error || 'Failed to record score', 'error');
+        return;
       }
 
       showToast('Score recorded successfully! (Active in 5-round FIFO)', 'success');
       setNewScore('');
       await fetchScores();
+      router.refresh();
     } catch {
       showToast('Error recording score. Please try again.', 'error');
     } finally {
@@ -145,8 +107,9 @@ export default function ScoresPage() {
         
         <form onSubmit={handleAddScore} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: '1rem', alignItems: 'flex-end' }}>
           <div className="form-group" style={{ marginBottom: 0 }}>
-            <label className="form-label">Stableford Points (1–45)</label>
+            <label className="form-label" htmlFor="score-input">Stableford Points (1–45)</label>
             <input
+              id="score-input"
               type="number"
               className="form-input"
               min={1}
@@ -158,8 +121,9 @@ export default function ScoresPage() {
             />
           </div>
           <div className="form-group" style={{ marginBottom: 0 }}>
-            <label className="form-label">Date Played</label>
+            <label className="form-label" htmlFor="date-input">Date Played</label>
             <input
+              id="date-input"
               type="date"
               className="form-input"
               max={new Date().toISOString().split('T')[0]}
@@ -169,7 +133,7 @@ export default function ScoresPage() {
             />
           </div>
           <button type="submit" className="btn btn-primary" disabled={submitting}>
-            {submitting ? 'Submitting...' : '+ Add Score'}
+            {submitting ? 'Submitting Score...' : '+ Submit Score'}
           </button>
         </form>
       </div>
