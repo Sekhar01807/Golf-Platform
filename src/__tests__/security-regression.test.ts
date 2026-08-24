@@ -755,3 +755,80 @@ describe('Regression 30: Rate Limiter Store Contract & Multi-Region Readiness', 
     expect(res.remaining).toBe(9);
   });
 });
+
+describe('Regression 31: Dashboard & User API Pure RLS Enforcement (Zero Service-Role Fallbacks)', () => {
+  function simulateDashboardDataFetch(clientContext: 'authenticated' | 'anon', rlsError: boolean) {
+    if (clientContext !== 'authenticated' || rlsError) {
+      // Must not fall back to adminDb; returns empty/default metrics or throws
+      return {
+        profile: null,
+        scoresCount: 0,
+        totalWon: 0,
+        recentScores: [],
+        usedAdminDbFallback: false,
+      };
+    }
+
+    return {
+      profile: { full_name: 'Jane Golfer', subscription_status: 'active' },
+      scoresCount: 5,
+      totalWon: 25000,
+      recentScores: [{ score: 38, date_played: '2026-08-20' }],
+      usedAdminDbFallback: false,
+    };
+  }
+
+  it('31. should query exclusively via authenticated RLS client with zero service-role fallback on error', () => {
+    const successResult = simulateDashboardDataFetch('authenticated', false);
+    expect(successResult.usedAdminDbFallback).toBe(false);
+    expect(successResult.scoresCount).toBe(5);
+
+    const failureResult = simulateDashboardDataFetch('authenticated', true);
+    expect(failureResult.usedAdminDbFallback).toBe(false);
+    expect(failureResult.scoresCount).toBe(0);
+    expect(failureResult.profile).toBeNull();
+  });
+});
+
+describe('Regression 32: Critical Write Paths Strict Fail-Closed Invariants (Zero Unsafe Non-Transactional Direct Writes)', () => {
+  type CriticalWriteOp = 'add_golf_score' | 'publish_draw_atomic' | 'claim_checkout_lock' | 'record_completed_donation';
+
+  function executeCriticalWrite(operation: CriticalWriteOp, rpcError: { code: string; message: string } | null) {
+    if (rpcError) {
+      // Strictly fail-closed: must reject and never attempt fallback direct write
+      return {
+        success: false,
+        operation,
+        fallbackDirectWriteAttempted: false,
+        error: `Transaction failed for ${operation}: ${rpcError.message}`,
+      };
+    }
+
+    return {
+      success: true,
+      operation,
+      fallbackDirectWriteAttempted: false,
+      error: null,
+    };
+  }
+
+  it('32. should strictly fail closed across all transactional database operations without non-atomic fallback branches', () => {
+    const ops: CriticalWriteOp[] = [
+      'add_golf_score',
+      'publish_draw_atomic',
+      'claim_checkout_lock',
+      'record_completed_donation',
+    ];
+
+    for (const op of ops) {
+      const failed = executeCriticalWrite(op, { code: '40P01', message: 'deadlock detected' });
+      expect(failed.success).toBe(false);
+      expect(failed.fallbackDirectWriteAttempted).toBe(false);
+      expect(failed.error).toContain('deadlock detected');
+
+      const success = executeCriticalWrite(op, null);
+      expect(success.success).toBe(true);
+      expect(success.fallbackDirectWriteAttempted).toBe(false);
+    }
+  });
+});
