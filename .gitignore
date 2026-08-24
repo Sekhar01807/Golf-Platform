@@ -37,6 +37,8 @@
 
 # ── Testing & Coverage ──
 /coverage
+/test-results/
+/playwright-report/
 
 # ── TypeScript & Runtime ──
 *.tsbuildinfo
@@ -62,7 +64,7 @@ ehthumbs.db
 Thumbs.db
 Desktop.ini
 
-# ── IDEs & Editors ──
+# ── IDEs & Local Agent Configs ──
 .vscode/*
 !.vscode/extensions.json
 !.vscode/settings.json
@@ -73,10 +75,11 @@ Desktop.ini
 *.sln
 *.swp
 *.swo
+.gemini/
+.system_generated/
 
 # ── Certificates & Keys ──
 *.pem
 *.key
 *.cert
 *.crt
-
