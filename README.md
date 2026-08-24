@@ -1,4 +1,6 @@
-# ⛳ GolfForGood — Golf Charity Subscription & Prize Draw Platform
+# GolfForGood
+
+A full-stack SaaS platform connecting golf performance tracking with verified charitable giving and simulated monthly prize draws. Built with Next.js 16 (App Router), React 19, TypeScript, Supabase (PostgreSQL with Row-Level Security), and Stripe Billing.
 
 [![Next.js](https://img.shields.io/badge/Next.js-16.2.0-black?style=flat-square&logo=next.js)](https://nextjs.org/)
 [![React](https://img.shields.io/badge/React-19.2.4-blue?style=flat-square&logo=react)](https://react.dev/)
@@ -6,642 +8,448 @@
 [![Zod](https://img.shields.io/badge/Zod-3.24.2-3068B7?style=flat-square&logo=zod&logoColor=white)](https://zod.dev/)
 [![Supabase](https://img.shields.io/badge/Supabase-PostgreSQL%20%2B%20RLS-3ECF8E?style=flat-square&logo=supabase&logoColor=white)](https://supabase.com/)
 [![Stripe](https://img.shields.io/badge/Stripe-Subscriptions%20%26%20Webhooks-635BFF?style=flat-square&logo=stripe&logoColor=white)](https://stripe.com/)
-[![Vitest](https://img.shields.io/badge/Vitest-100%20Automated%20Tests%20Passing-6E9F18?style=flat-square&logo=vitest&logoColor=white)](https://vitest.dev/)
-
-> **An enterprise-grade full-stack SaaS platform combining athletic golf score tracking, verified charitable contributions, and simulated skill-based monthly prize draws.** Built with Next.js 16 (App Router), React 19, TypeScript, Zod Schema Validation, Supabase (PostgreSQL with Row-Level Security, database triggers, and atomic `SECURITY DEFINER` stored procedures), and Stripe Billing.
+[![Vitest](https://img.shields.io/badge/Vitest-100%20Tests%20Passing-6E9F18?style=flat-square&logo=vitest&logoColor=white)](https://vitest.dev/)
 
 ---
 
-## 📌 Project Scope & Educational Disclaimer
+## Executive Summary
 
-> [!NOTE]
-> **Educational & Portfolio Demonstration**  
-> **GolfForGood** is an educational software engineering project created to demonstrate full-stack architecture, relational database integrity, idempotent financial processing, application-level rate limiting, and stateful webhook synchronization.
-> 
-> The monthly prize draws and payout workflows are **simulated demonstrations** designed to showcase mathematical pool conservation, scorecard verification queues, and recoverable payout failure paths. This application is **not** an operational real-money gambling, lottery, or commercial wagering service.
+GolfForGood enables golfers to log their authentic 18-hole Stableford rounds, automate charitable contributions through their membership dues, and participate in monthly skill-based prize draws.
 
----
+The platform is designed with an emphasis on relational database integrity, idempotent financial transaction processing, rate limiting, and zero-trust security.
 
-## 📖 Overview & Core Mechanisms
-
-**GolfForGood** connects golfers' athletic performance with verified philanthropic giving. Members maintain a recurring monthly (₹499/mo) or annual (₹4,999/yr) subscription, record their 18-hole Stableford golf scores (1–45 points), direct a customizable portion of their membership dues (10%–50%) to partner charities, and enter simulated monthly skill-based prize draws.
-
-### Technical Pillars
-- 🏆 **Athletic Score Tracking**: Members submit authentic golf rounds (1–45 Stableford points) with a strict 5-round FIFO history and proof scorecard uploads.
-- 💚 **Philanthropic Allocation**: 10%–50% of membership dues and direct donations route to partner causes with real-time transparent ledgers.
-- 🎰 **Simulated Prize Draws**: Monthly draws allocate 40% (Jackpot), 35%, and 25% across 5-match, 4-match, and 3-match score tiers, conserving all residual funds into rolling jackpots.
-- 🛡️ **Technical Robustness**: Powered by Zod schema validation, sliding-window rate limiting, Supabase Row-Level Security (RLS), server-side role authorization, Stripe webhook signature verification, stateful idempotency with in-flight lock isolation, strictly fail-closed transactional PostgreSQL stored procedures (`SECURITY DEFINER`), and immutable administrative audit logs.
+> **Project Scope**: The monthly prize draws and winner payouts operate as a simulated mathematical demonstration. This application is an educational and portfolio engineering project and is not an operational commercial gambling or lottery service.
 
 ---
 
-## 🏗️ System Architecture
+## Real-World Operational Workflows
 
-### Multi-Tier Architecture Diagram
+### 1. Subscription Onboarding & Charity Allocation
+1. **Selection & Intent**: The user registers and selects either a Monthly (₹499/mo) or Yearly (₹4,999/yr) plan, along with their chosen partner charity and contribution percentage (10% to 50%).
+2. **Checkout Session Creation**:
+   - Client sends `POST /api/checkout` with `{ plan: "monthly" }`.
+   - API verifies authentication session and applies sliding-window rate limit (5 req/min).
+   - Database acquires a 5-minute row lock (`claim_checkout_lock`) on `public.users` to prevent duplicate concurrent checkouts.
+   - API initializes a hosted Stripe Checkout session with customer email and metadata.
+3. **Payment & Activation**:
+   - User completes payment on Stripe.
+   - Stripe dispatches `checkout.session.completed` to `/api/webhooks/stripe`.
+   - Webhook checks signature, claims event in `public.stripe_events`, activates the user profile (`subscription_status = 'active'`), and records charity allocation preferences.
+   - Resend sends a subscription confirmation email.
+
+### 2. Golf Score Logging & 5-Round FIFO Pruning
+1. **Submission**:
+   - Golfer logs round at `/dashboard`: score (1–45 Stableford points) and date played.
+   - Client sends `POST /api/scores` with `{ score: 38, date_played: "2026-08-20" }`.
+2. **Validation & Rate Limiting**:
+   - IP rate limiter allows up to 10 submissions per minute.
+   - Zod schema validates Stableford score range and rejects future dates or dates older than 2 years.
+3. **Database FIFO Pruning**:
+   - The API invokes the PostgreSQL function `add_golf_score(p_user_id, p_score, p_date_played)`.
+   - The procedure locks the user row (`PERFORM ... FOR UPDATE`), counts existing scores in `public.golf_scores`, deletes the oldest record if 5 scores already exist, and inserts the new score in a single atomic transaction.
+4. **UI Update**:
+   - The dashboard updates in real time, rendering the 5-round card and calculating the member's current scoring average.
+
+### 3. Monthly Prize Draw Execution & Rollover
+1. **Eligibility Filter**:
+   - The draw engine queries all active subscribers who possess exactly 5 recorded golf scores.
+2. **Draw Computation**:
+   - Admin triggers draw simulation from `/admin/draws`.
+   - System generates 5 unique winning numbers (1–45) using CSPRNG.
+   - Each member's 5 scores are matched against the winning set:
+     - 5 Matches: 40% of pool (Tier 1 Jackpot)
+     - 4 Matches: 35% of pool (Tier 2)
+     - 3 Matches: 25% of pool (Tier 3)
+3. **Integer Arithmetic & Pool Conservation**:
+   - All allocations are calculated in integer paise/cents.
+   - If any tier has zero winners, its allocation and any division remainders automatically roll over into `rollover_amount` for next month's jackpot.
+4. **Atomic Publication**:
+   - Admin confirms publication via `POST /api/admin/draws` with `{ action: "publish" }`.
+   - Stored procedure `publish_draw_atomic` executes status transition, bulk-inserts winners into `public.draw_winners`, updates pool totals, and logs an immutable entry to `public.audit_logs`.
+
+### 4. Scorecard Verification & Payout Pipeline
+1. **Winner Notification**:
+   - Winners see a verification banner in `/dashboard/draws`.
+2. **Proof Upload**:
+   - Golfer enters the URL of their signed physical scorecard photo.
+   - Client updates `public.draw_winners.winner_proof_url`. A database trigger blocks updates to any other column while status is `pending`.
+3. **Administrative Review**:
+   - Admin views the proof URL in `/admin/winners`.
+   - Admin approves or rejects the submission via `PATCH /api/admin/winners`.
+4. **Payout Integrity**:
+   - Database `CHECK` constraint (`chk_draw_winners_payout_verified`) rejects any update setting `payout_status = 'paid'` unless `verification_status = 'approved'`.
+
+### 5. Direct Charity Donation Flow
+1. **Donation Checkout**:
+   - Any visitor or member selects a partner cause at `/charities` and enters a custom amount.
+   - Client calls `POST /api/donations` with `{ charityId: "...", amount: 500 }`.
+   - A one-time Stripe Checkout session is created with charity metadata.
+2. **Idempotent Ledger Update**:
+   - On payment completion, webhook receives `checkout.session.completed` with `type = 'donation'`.
+   - Webhook calls `record_completed_donation()`, which inserts the donation into `public.independent_donations` guarded by `UNIQUE(stripe_payment_id)` and atomically increments `charities.total_contributions`.
+
+---
+
+## Key Features
+
+- **Subscription Billing**: Recurring monthly (₹499/mo) and annual (₹4,999/yr) Stripe integration.
+- **Charity Allocation**: 10%–50% of dues routed to partner charities with tamper-proof ledgers.
+- **5-Round FIFO Score Tracking**: Stableford score logging with database-enforced FIFO history.
+- **Simulated Monthly Prize Draws**: Multi-tier matching (5, 4, 3 matches) with mathematically conserved rollovers.
+- **Scorecard Verification**: Proof URL upload queue with strict database check constraints.
+- **Security & Reliability**: Zod validation, sliding-window rate limiting, RLS tenant isolation, and idempotent webhook handlers.
+
+---
+
+## System Architecture
 
 ```mermaid
 flowchart TD
-    subgraph ClientTier["1. Presentation Tier (Client / Browser)"]
-        UI["Next.js 16 App Router UI (React 19)"]
-        Forms["Client Forms & Score Entry"]
-        Portal["Member Dashboard & Stripe Portal Trigger"]
+    subgraph Client["Presentation Layer (Client)"]
+        UI["Next.js 16 App Router (React 19)"]
+        MemberDashboard["Member Dashboard & Score Logger"]
+        AdminDashboard["Admin Management Portal"]
     end
 
-    subgraph SecurityGateway["2. Edge & Security Gateway Tier"]
-        RL["Sliding-Window IP Rate Limiter (src/lib/rate-limit.ts)"]
-        CORS["Origin & Method Validation"]
-        AuthGuard["Server-Side Auth Session Validation (auth.uid())"]
-        ZodParser["Zod Schema Validation Layer (SafeParse + Type Guards)"]
+    subgraph Security["Edge & Gateway Layer"]
+        RateLimiter["Sliding-Window Rate Limiter (IP-Based)"]
+        AuthMiddleware["Server-Side Auth Session Validation"]
+        ZodValidation["Zod Schema Validation Layer"]
     end
 
-    subgraph AppLayer["3. Serverless API & Application Layer"]
-        CheckoutAPI["/api/checkout (Lock Claim + Session Init)"]
-        ScoreAPI["/api/scores (FIFO Score Submission)"]
-        DonationAPI["/api/donations (Charity Direct Checkout)"]
-        BillingAPI["/api/billing (Stripe Portal Session)"]
-        AdminAPI["/api/admin/* (RBAC Enforced Admin Actions)"]
-        WebhookAPI["/api/webhooks/stripe (Signature Verification)"]
-        DrawEngine["Draw Computation Service (CSPRNG / Deterministic)"]
-        EmailService["Transactional Email Service (Resend API)"]
+    subgraph Application["API & Application Services"]
+        CheckoutRoute["/api/checkout (Lock Claim + Session Init)"]
+        ScoresRoute["/api/scores (FIFO Score Submission)"]
+        DonationsRoute["/api/donations (Direct Charity Checkout)"]
+        WebhookRoute["/api/webhooks/stripe (Stateful Idempotency)"]
+        DrawService["Draw Calculation Service"]
+        AdminRoutes["/api/admin/* (RBAC Enforced Endpoints)"]
     end
 
-    subgraph StripeCloud["4. External Billing & Payment Infrastructure"]
-        StripeCheckout["Stripe Checkout (Hosted Session)"]
-        StripePortal["Stripe Customer Billing Portal"]
-        StripeWebhooks["Stripe Webhook Delivery Engine"]
+    subgraph External["External Infrastructure"]
+        Stripe["Stripe Payments & Webhook Engine"]
+        Resend["Resend Transactional Email"]
     end
 
-    subgraph DataLayer["5. Supabase PostgreSQL Relational Data Layer"]
-        RLS["PostgreSQL Engine (Row-Level Security Policies)"]
-        UsersTab[("public.users (Profiles + Subscription State)")]
-        ScoresTab[("public.golf_scores (Strict 5-Score FIFO)")]
-        DrawsTab[("public.draws & public.draw_winners")]
-        CharitiesTab[("public.charities (Ledger Protected)")]
-        DonationsTab[("public.independent_donations (Unique Stripe ID)")]
-        EventsTab[("public.stripe_events (Stateful Idempotency Ledger)")]
-        AuditTab[("public.audit_logs (Immutable Admin History)")]
+    subgraph Database["Data Layer (Supabase PostgreSQL)"]
+        RLS["Row-Level Security (Zero-Trust)"]
+        Users["public.users"]
+        Scores["public.golf_scores (FIFO Trigger)"]
+        Draws["public.draws & draw_winners"]
+        Charities["public.charities (Ledger Protected)"]
+        StripeEvents["public.stripe_events (Idempotency Ledger)"]
+        AuditLogs["public.audit_logs (Immutable History)"]
     end
 
-    %% Client Interactions
-    UI -->|"HTTP Requests"| RL
-    Forms -->|"Score / Donation Data"| RL
-    Portal -->|"Billing Portal Request"| RL
+    UI --> RateLimiter
+    MemberDashboard --> RateLimiter
+    AdminDashboard --> RateLimiter
 
-    %% Security Gateway Flow
-    RL -->|"Within Limits (RFC Headers)"| CORS
-    RL -.->|"Exceeded Limit"| R429["HTTP 429 Too Many Requests (Retry-After)"]
-    CORS --> AuthGuard
-    AuthGuard --> ZodParser
+    RateLimiter --> AuthMiddleware
+    AuthMiddleware --> ZodValidation
 
-    %% Route Dispatching
-    ZodParser -->|"Validated POST"| CheckoutAPI
-    ZodParser -->|"Validated POST"| ScoreAPI
-    ZodParser -->|"Validated POST"| DonationAPI
-    ZodParser -->|"Validated POST"| BillingAPI
-    ZodParser -->|"Admin Token + Role"| AdminAPI
+    ZodValidation --> CheckoutRoute
+    ZodValidation --> ScoresRoute
+    ZodValidation --> DonationsRoute
+    ZodValidation --> AdminRoutes
 
-    %% Application to Database RPCs
-    CheckoutAPI -->|"RPC: claim_checkout_lock()"| UsersTab
-    CheckoutAPI -->|"Init Subscription"| StripeCheckout
-    ScoreAPI -->|"RPC: add_golf_score() [FOR UPDATE]"| ScoresTab
-    DonationAPI -->|"Init Donation"| StripeCheckout
-    BillingAPI -->|"Retrieve Customer ID"| UsersTab
-    BillingAPI -->|"Create Portal Session"| StripePortal
-    AdminAPI -->|"RPC: publish_draw_atomic()"| DrawsTab
-    AdminAPI -->|"Log Audit Entry"| AuditTab
+    CheckoutRoute --> Stripe
+    DonationsRoute --> Stripe
+    Stripe --> WebhookRoute
+    WebhookRoute --> Resend
 
-    %% Stripe Webhook Flow
-    StripeWebhooks -->|"POST /api/webhooks/stripe (stripe-signature)"| WebhookAPI
-    WebhookAPI -->|"RPC: claim_stripe_event()"| EventsTab
-    WebhookAPI -->|"RPC: record_completed_donation()"| DonationsTab
-    WebhookAPI -->|"Sync Subscription State"| UsersTab
-    WebhookAPI -->|"RPC: complete_stripe_event()"| EventsTab
-    WebhookAPI -->|"Trigger Notifications"| EmailService
-
-    %% Database Internal Links
-    ScoresTab -.->|"Foreign Key Cascade"| UsersTab
-    DrawsTab -.->|"Foreign Key"| UsersTab
-    DonationsTab -.->|"Foreign Key + Unique ID"| CharitiesTab
-    UsersTab -.->|"Protected by"| RLS
-    ScoresTab -.->|"Protected by"| RLS
-    DrawsTab -.->|"Protected by"| RLS
-
-    %% Styling
-    classDef client fill:#0f172a,stroke:#38bdf8,stroke-width:2px,color:#ffffff;
-    classDef gateway fill:#1e1b4b,stroke:#818cf8,stroke-width:2px,color:#ffffff;
-    classDef app fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#ffffff;
-    classDef stripe fill:#312e81,stroke:#a78bfa,stroke-width:2px,color:#ffffff;
-    classDef db fill:#14532d,stroke:#4ade80,stroke-width:2px,color:#ffffff;
-
-    class UI,Forms,Portal client;
-    class RL,CORS,AuthGuard,ZodParser gateway;
-    class CheckoutAPI,ScoreAPI,DonationAPI,BillingAPI,AdminAPI,WebhookAPI,DrawEngine,EmailService app;
-    class StripeCheckout,StripePortal,StripeWebhooks stripe;
-    class RLS,UsersTab,ScoresTab,DrawsTab,CharitiesTab,DonationsTab,EventsTab,AuditTab db;
+    CheckoutRoute --> Database
+    ScoresRoute --> Database
+    DonationsRoute --> Database
+    WebhookRoute --> Database
+    DrawService --> Database
+    AdminRoutes --> Database
 ```
 
 ---
 
-### Architectural Sequence Flow
+## Technical Design & Security Highlights
 
-```mermaid
-sequenceDiagram
-    autonumber
-    actor Member as Golfer / Member
-    participant UI as Next.js 16 Frontend
-    participant RL as Rate Limiter Layer
-    participant API as Route Handlers (Zod + Auth)
-    participant DB as Supabase PostgreSQL (RLS)
-    participant Stripe as Stripe Platform
-    participant Mailer as Resend Email Service
+### 1. Idempotent Stripe Webhook Processing
+To prevent duplicate processing from network retries, the webhook handler implements a stateful ledger backed by `public.stripe_events`:
+- **Cryptographic Signature**: Validates incoming payloads against the endpoint signing secret.
+- **State Machine**:
+  - `completed`: Returns immediate HTTP 200 OK without re-executing logic.
+  - `processing` (< 300s old): Identified as in-flight; returns HTTP 200 OK to prevent race conditions.
+  - `fresh / failed`: Claims execution lock, runs transaction, and transitions status to `completed` upon success or `failed` upon error.
 
-    %% 1. Subscription Checkout Flow
-    rect rgb(15, 23, 42)
-    Note over Member, Stripe: Step 1: Subscription Checkout & Concurrency Lock
-    Member->>UI: Selects Plan & Signs Up
-    UI->>RL: POST /api/checkout { plan: "yearly" }
-    RL->>API: Rate limit check passes (5 req/min)
-    API->>API: Zod schema safeParse(CheckoutSchema)
-    API->>DB: RPC claim_checkout_lock(user_id) [Row Lock FOR UPDATE]
-    DB-->>API: Lock acquired (5 min TTL)
-    API->>Stripe: stripe.checkout.sessions.create()
-    Stripe-->>API: Checkout Session URL
-    API-->>UI: Redirect { url: session.url }
-    Member->>Stripe: Completes Payment on Stripe Hosted Checkout
-    end
+### 2. Row-Level Security & Atomic Database Procedures
+- **PostgreSQL Row-Level Security (RLS)**: Enforces tenant isolation so users can only read their own scorecards and profile data.
+- **Fail-Closed Stored Procedures (`SECURITY DEFINER`)**:
+  - `add_golf_score`: Serializes score submission with row-level locking (`FOR UPDATE`), enforces the 5-score FIFO limit, and validates bounds in a single transaction.
+  - `claim_checkout_lock`: Applies a 5-minute concurrency lock to prevent duplicate checkout sessions.
+  - `publish_draw_atomic`: Executes draw status updates, bulk winner insertion, rollover calculations, and audit logging within an atomic transaction.
+  - `record_completed_donation`: Enforces unique payment constraint idempotency and updates charity ledgers securely.
 
-    %% 2. Stateful Webhook Execution
-    rect rgb(6, 78, 59)
-    Note over Stripe, Mailer: Step 2: Webhook Delivery & Stateful Idempotency
-    Stripe->>API: Webhook (checkout.session.completed) [stripe-signature]
-    API->>API: stripe.webhooks.constructEvent(body, sig, secret)
-    API->>DB: RPC claim_stripe_event(event_id, event_type)
-    alt Fresh Event (First Delivery)
-        DB-->>API: Status: 'CLAIMED'
-        API->>DB: Fetch user profile & cross-check stripe_customer_id
-        API->>DB: UPDATE public.users (status='active', plan='yearly', dates)
-        API->>DB: RPC complete_stripe_event(event_id)
-        API->>Mailer: sendEmail() [Subscription Confirmation]
-        API-->>Stripe: HTTP 200 OK { received: true }
-    else Retried Duplicate (Already Completed)
-        DB-->>API: Status: 'DUPLICATE_COMPLETED'
-        API-->>Stripe: HTTP 200 OK { received: true, duplicate: true }
-    else In-Flight Duplicate (< 300s window)
-        DB-->>API: Status: 'IN_FLIGHT'
-        API-->>Stripe: HTTP 200 OK { received: true, in_flight: true }
-    end
-    end
+### 3. Application-Level Rate Limiting
+A sliding-window rate limiter protects sensitive endpoints against abuse:
+- `/api/scores`: 10 requests / 60 seconds
+- `/api/checkout`: 5 requests / 60 seconds
+- `/api/donations`: 5 requests / 60 seconds
+- `/api/billing`: 5 requests / 60 seconds
+- Returns standard RFC headers (`X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`, `Retry-After`).
 
-    %% 3. Score Entry Flow
-    rect rgb(30, 27, 75)
-    Note over Member, DB: Step 3: Athletic Score Submission (5-Score FIFO)
-    Member->>UI: Submits Stableford Score (e.g., 38 pts)
-    UI->>RL: POST /api/scores { score: 38, date_played: "2026-08-17" }
-    RL->>API: Rate limit check passes (10 req/min)
-    API->>API: Zod schema safeParse(ScoreSchema) [1-45 pts, valid date]
-    API->>DB: RPC add_golf_score(user_id, score, date) [FOR UPDATE]
-    Note over DB: Serializes user row, counts scores, purges oldest if count >= 5
-    DB-->>API: Returns new score UUID
-    API-->>UI: HTTP 201 Created
-    end
+### 4. Input Validation & Type Safety
+All client inputs are strictly validated at runtime using Zod before reaching any business logic or database operations:
+- Scores: Constrained to integers between 1 and 45 points, with historical date boundaries.
+- Donations & Subscriptions: Validated against allowable plans, valid charity UUIDs, and positive integer amounts.
+- Draw Actions: Enforces valid state transitions (`simulate`, `publish`, `lock`).
 
-    %% 4. Monthly Draw & Publication
-    rect rgb(20, 83, 45)
-    Note over API, DB: Step 4: Draw Calculation & Atomic Publication
-    API->>DB: Admin triggers Draw Engine (CSPRNG or SHA-256)
-    DB->>API: Fetches active members with exactly 5 scores
-    API->>API: Matches score sets, calculates prize splits (40%/35%/25%)
-    API->>DB: RPC publish_draw_atomic(draw_id, winners_json, rollover)
-    Note over DB: Single ACID transaction updates status, bulk inserts winners, writes audit log
-    DB-->>API: Publication Confirmed
-    DB-->>UI: Member views verified prize results & submits scorecard proof URL
-    end
+### 5. Floating-Point Protection
+All financial calculations (payout allocations, donation splits, and rollover remainders) operate strictly on integer cents/paise subunits to eliminate IEEE 754 floating-point rounding errors.
+
+---
+
+## Repository Structure
+
+```
+Golf-Platform/
+├── src/
+│   ├── app/                      # Next.js 16 App Router pages & route handlers
+│   │   ├── admin/                # Admin portal (charities, draws, winners, users)
+│   │   ├── api/                  # Backend REST route handlers
+│   │   │   ├── admin/            # Admin management APIs (charities, draws, winners)
+│   │   │   ├── billing/          # Stripe Customer Portal session handler
+│   │   │   ├── checkout/         # Stripe checkout session creation
+│   │   │   ├── donations/        # Direct charity donation checkout handler
+│   │   │   ├── scores/           # Golf score submission (FIFO enforced)
+│   │   │   └── webhooks/stripe/  # Stateful idempotent webhook receiver
+│   │   ├── charities/            # Public charity directory & donation flow
+│   │   ├── dashboard/            # Golfer member portal & score logger
+│   │   ├── draws/                # Public draw results & winner verification
+│   │   └── layout.tsx            # Global layout with navigation & providers
+│   ├── components/               # Reusable UI components & modals
+│   ├── lib/                      # Business logic, utilities, and validation
+│   │   ├── validations/          # Zod schemas & runtime type guards
+│   │   ├── rate-limit.ts         # Sliding-window IP rate limiter
+│   │   ├── supabase.ts           # Supabase client & server initialization
+│   │   └── utils/                # Integer currency arithmetic & formatting
+│   └── __tests__/                # Vitest test suites (100 passing tests)
+├── supabase/
+│   └── schema.sql                # Complete PostgreSQL schema, RLS, triggers & RPCs
+└── public/                       # Static assets & icons
 ```
 
 ---
 
-### Stateful Webhook Idempotency State Machine
-
-```mermaid
-stateDiagram-v2
-    [*] --> UnseenEvent : Webhook Received (stripe-signature)
-
-    UnseenEvent --> Claiming : claim_stripe_event(event_id)
-    
-    state Claiming {
-        [*] --> CheckStatus
-        CheckStatus --> IsCompleted : status == 'completed'
-        CheckStatus --> IsInFlight : status == 'processing' AND age < 300s
-        CheckStatus --> IsStaleOrFresh : status == 'failed' OR age >= 300s OR not found
-    }
-
-    IsCompleted --> AckDuplicate : Return DUPLICATE_COMPLETED
-    AckDuplicate --> [*] : HTTP 200 OK (No Mutation)
-
-    IsInFlight --> AckInFlight : Return IN_FLIGHT
-    AckInFlight --> [*] : HTTP 200 OK (Concurrency Guard)
-
-    IsStaleOrFresh --> Processing : Insert / Reclaim 'processing' (Status: CLAIMED)
-
-    state Processing {
-        [*] --> ExecuteBusinessLogic
-        ExecuteBusinessLogic --> UpdateSubscriptions : checkout.session.completed
-        ExecuteBusinessLogic --> RecordDonation : record_completed_donation()
-        ExecuteBusinessLogic --> UpdateBillingStatus : customer.subscription.updated / invoice.*
-    }
-
-    Processing --> Completed : Business Logic Succeeded
-    Completed --> FinalizeClaim : complete_stripe_event(event_id)
-    FinalizeClaim --> [*] : HTTP 200 OK
-
-    Processing --> Failed : Business Logic Threw Error
-    Failed --> FailEvent : fail_stripe_event(event_id)
-    FailEvent --> RetryScheduled : HTTP 500 Internal Server Error
-    RetryScheduled --> [*] : Stripe Exponential Backoff Retry
-```
-
----
-
-### Rate Limiter Sliding-Window Flow
-
-```mermaid
-flowchart LR
-    subgraph RateLimiting["Sliding-Window IP Throttler"]
-        Req["Incoming HTTP Request"] --> GetIP["Extract Client IP (x-forwarded-for / x-real-ip)"]
-        GetIP --> FetchBucket["Lookup IP Window Key in Memory Store"]
-        FetchBucket --> EvictOld["Evict Timestamps < (Now - WindowDuration)"]
-        EvictOld --> CheckCount{"Count < MaxRequests?"}
-        CheckCount -- Yes --> AppendTS["Append Current Timestamp"]
-        AppendTS --> Allow["Set X-RateLimit Headers & Proceed to Handler"]
-        CheckCount -- No --> CalcReset["Calculate Reset Time & Retry-After (seconds)"]
-        CalcReset --> Deny["Return HTTP 429 Too Many Requests"]
-    end
-
-    classDef pass fill:#064e3b,stroke:#34d399,stroke-width:2px,color:#ffffff;
-    classDef fail fill:#7f1d1d,stroke:#f87171,stroke-width:2px,color:#ffffff;
-    class Allow pass;
-    class Deny fail;
-```
-
----
-
-## 🗄️ Database Schema & Entity-Relationship (ER) Model
+## Database Schema
 
 ```mermaid
 erDiagram
-    USERS ||--o{ GOLF_SCORES : "logs (max 5 FIFO)"
-    USERS }o--|| CHARITIES : "directs 10-50% dues"
-    USERS ||--o{ DRAW_ENTRIES : "enters with score set"
+    USERS ||--o{ GOLF_SCORES : "maintains max 5 scores"
+    USERS }o--|| CHARITIES : "allocates subscription %"
     USERS ||--o{ DRAW_WINNERS : "claims prize"
     USERS ||--o{ INDEPENDENT_DONATIONS : "donates"
-    DRAWS ||--o{ DRAW_ENTRIES : "contains"
-    DRAWS ||--o{ DRAW_WINNERS : "awards"
+    DRAWS ||--o{ DRAW_WINNERS : "contains winners"
     CHARITIES ||--o{ INDEPENDENT_DONATIONS : "receives"
-    USERS ||--o{ AUDIT_LOGS : "acts as admin"
+    USERS ||--o{ AUDIT_LOGS : "admin actor"
 
     USERS {
-        uuid id PK "auth.users FK, CASCADE"
-        string email "synchronized via trigger"
-        string full_name "profile metadata"
-        user_role role "user | admin (protected)"
-        string stripe_customer_id "server controlled"
-        string stripe_subscription_id "server controlled"
-        subscription_status subscription_status "active | inactive | cancelled | lapsed"
-        subscription_plan subscription_plan "monthly | yearly"
-        timestamptz subscription_start_date "period start"
-        timestamptz subscription_end_date "period end"
-        timestamptz checkout_lock_until "5-min concurrency lock"
-        uuid selected_charity_id FK "charities.id"
-        integer charity_contribution_percentage "10 to 50 CHECK"
-        timestamptz created_at "default now()"
-        timestamptz updated_at "auto trigger"
-    }
-
-    CHARITIES {
-        uuid id PK "uuid_generate_v4()"
-        string name "not null"
-        string description "markdown text"
-        string image_url "hosted asset"
-        boolean is_featured "highlight flag"
-        string upcoming_events "event details"
-        numeric total_contributions "verified ledger sum (protected)"
-        timestamptz created_at "default now()"
+        uuid id PK
+        string email
+        string full_name
+        string role
+        string stripe_customer_id
+        string stripe_subscription_id
+        string subscription_status
+        string subscription_plan
+        uuid selected_charity_id FK
+        integer charity_contribution_percentage
+        timestamptz created_at
     }
 
     GOLF_SCORES {
-        uuid id PK "uuid_generate_v4()"
-        uuid user_id FK "users.id, CASCADE"
-        integer score "1 to 45 Stableford CHECK"
-        date date_played "max 2 yrs old, no future"
-        timestamptz created_at "default now()"
+        uuid id PK
+        uuid user_id FK
+        integer score
+        date date_played
+        timestamptz created_at
+    }
+
+    CHARITIES {
+        uuid id PK
+        string name
+        string description
+        string image_url
+        boolean is_featured
+        numeric total_contributions
+        timestamptz created_at
     }
 
     DRAWS {
-        uuid id PK "uuid_generate_v4()"
-        date draw_month UK "unique month identifier"
-        draw_status status "simulated | published | locked"
-        draw_type draw_logic "random | algorithmic"
-        integer_array winning_numbers "5 unique numbers (1-45)"
-        numeric total_prize_pool "integer converted pool"
-        numeric rollover_amount "conserved remainder rollover"
-        timestamptz created_at "default now()"
-        timestamptz published_at "timestamp of ACID publish"
+        uuid id PK
+        date draw_month
+        string status
+        string draw_logic
+        integer_array winning_numbers
+        numeric total_prize_pool
+        numeric rollover_amount
+        timestamptz published_at
     }
 
     DRAW_WINNERS {
-        uuid id PK "uuid_generate_v4()"
-        uuid draw_id FK "draws.id, CASCADE"
-        uuid user_id FK "users.id, CASCADE"
-        string match_type "5-match | 4-match | 3-match"
-        numeric prize_amount "conserved tier payout"
-        string winner_proof_url "scorecard verification URL"
-        verification_status verification_status "pending | approved | rejected"
-        payout_status payout_status "pending | paid (guarded by CHECK)"
-        timestamptz created_at "default now()"
+        uuid id PK
+        uuid draw_id FK
+        uuid user_id FK
+        string match_type
+        numeric prize_amount
+        string winner_proof_url
+        string verification_status
+        string payout_status
     }
 
     INDEPENDENT_DONATIONS {
-        uuid id PK "uuid_generate_v4()"
-        uuid user_id FK "users.id, SET NULL"
-        uuid charity_id FK "charities.id, RESTRICT"
-        numeric amount "amount > 0 CHECK"
-        payment_status payment_status "pending | completed"
-        string stripe_payment_id UK "unique constraint prevents duplicate inflation"
-        timestamptz created_at "default now()"
+        uuid id PK
+        uuid user_id FK
+        uuid charity_id FK
+        numeric amount
+        string payment_status
+        string stripe_payment_id UK
     }
 
     STRIPE_EVENTS {
-        string id PK "Stripe event ID"
-        string event_type "e.g. checkout.session.completed"
-        stripe_event_status status "processing | completed | failed"
-        timestamptz created_at "default now()"
-        timestamptz processed_at "completion timestamp"
+        string id PK
+        string event_type
+        string status
+        timestamptz created_at
+        timestamptz processed_at
     }
 
     AUDIT_LOGS {
-        uuid id PK "uuid_generate_v4()"
-        uuid actor_id FK "users.id, SET NULL"
-        string action "e.g. PUBLISH_DRAW_ATOMIC"
-        string target_type "table or entity"
-        string target_id "target record identifier"
-        jsonb details "structured JSON audit context"
-        timestamptz created_at "default now()"
+        uuid id PK
+        uuid actor_id FK
+        string action
+        string target_type
+        string target_id
+        jsonb details
+        timestamptz created_at
     }
 ```
 
 ---
 
-## ⚙️ Core Technical Mechanisms & Deep Dives
+## API Reference
 
-### 1. Zod Schema Validation & Inferred Type Safety
-Every public and authenticated API endpoint executes schema validation before interacting with database RPCs or Stripe services.
-
-- **`ScoreSchema`**: Enforces integer Stableford scores ($1 \le \text{score} \le 45$), ISO dates, maximum 2-year lookback, and rejects future dates.
-- **`CheckoutSchema`**: Validates membership plans (`'monthly' | 'yearly'`) and success/cancel redirection URLs.
-- **`DonationSchema`**: Requires valid UUID charity IDs and positive integer donation amounts.
-- **`DrawActionSchema`**: Strictly validates administrator draw actions (`'simulate' | 'publish' | 'lock' | 'forceRegenerate'`) and optional CSPRNG seed tokens.
-- **`ProofUrlSchema`**: Validates scorecard proof URLs against strict HTTPS regex patterns before permitting verification review.
-
-```typescript
-// Example: SafeParse pattern with RFC compliant 400 rejection
-const parseResult = ScoreSchema.safeParse(await request.json());
-if (!parseResult.success) {
-  return NextResponse.json({
-    error: 'Validation failed',
-    issues: parseResult.error.flatten().fieldErrors
-  }, { status: 400 });
-}
-const { score, date_played } = parseResult.data; // Fully typed ScoreInput
-```
+| Endpoint | Method | Authentication | Rate Limit | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| `/api/checkout` | `POST` | User Session | 5 / min | Initiates Stripe Checkout session for subscription |
+| `/api/billing` | `POST` | User Session | 5 / min | Creates Stripe Customer Portal session |
+| `/api/donations` | `POST` | Public / User | 5 / min | Initiates direct donation checkout session |
+| `/api/scores` | `GET` | User Session | Standard | Fetches member's 5-score history |
+| `/api/scores` | `POST` | User Session | 10 / min | Submits a new Stableford score (FIFO enforced) |
+| `/api/webhooks/stripe` | `POST` | Stripe Signature | Webhook | Handles asynchronous Stripe event notifications |
+| `/api/admin/charities` | `GET`, `POST`, `PATCH`, `DELETE` | Admin Role | Standard | CRUD operations on partner charities |
+| `/api/admin/draws` | `GET`, `POST` | Admin Role | Standard | Simulates, publishes, or locks monthly draws |
+| `/api/admin/winners` | `GET`, `PATCH` | Admin Role | Standard | Reviews scorecard proofs and updates payout status |
+| `/api/admin/users` | `GET` | Admin Role | Standard | Lists member profiles and subscription statuses |
 
 ---
 
-### 2. Application-Level Sliding-Window Rate Limiting
-To defend against automated scraping, credential abuse, and concurrency spam, the platform implements an application-level sliding-window rate limiter ([`src/lib/rate-limit.ts`](file:///src/lib/rate-limit.ts)).
+## Automated Testing
 
-- **Granular Endpoint Policies**:
-  - `POST /api/scores`: Max 10 requests / 60 seconds
-  - `POST /api/checkout`: Max 5 requests / 60 seconds
-  - `POST /api/donations`: Max 5 requests / 60 seconds
-  - `POST /api/billing`: Max 5 requests / 60 seconds
-- **RFC-Compliant Response Headers**:
-  - `X-RateLimit-Limit`: Maximum requests permitted within the window.
-  - `X-RateLimit-Remaining`: Remaining request capacity.
-  - `X-RateLimit-Reset`: Unix timestamp when the window resets.
-  - `Retry-After`: Delta seconds to wait when HTTP 429 is returned.
-- **Architectural Model & Multi-Region Roadmap**:
-  - **Single-Node / Containerized (Default)**: In-memory `Map<string, number[]>` sliding-window store providing zero-network latency, sub-millisecond execution, and zero external infrastructure dependencies.
-  - **Distributed Multi-Region Deployment (Pluggable)**: Exposes a standardized `RateLimiterStore` interface (`check`, `reset`) designed for seamless drop-in integration with distributed Redis backends (e.g. Upstash Redis atomic Lua scripts / REST pipeline) for horizontally scaled serverless edge networks.
+The codebase includes an automated test suite executed with Vitest:
 
----
+| Test Suite | File | Tests | Focus Area |
+| :--- | :--- | :--- | :--- |
+| Security Regression | `src/__tests__/security-regression.test.ts` | 30 | RLS boundaries, RPC locks, fail-closed guards |
+| Input Validation | `src/__tests__/validations.test.ts` | 24 | Zod schemas, boundary limits, sanitization |
+| Authorization | `src/__tests__/auth-security.test.ts` | 13 | Role verification, privilege escalation checks |
+| Draw Computation | `src/__tests__/draw.service.test.ts` | 12 | Prize pool splits, number generation, rollovers |
+| Failure Recovery | `src/__tests__/failure-path-recovery.test.ts` | 8 | End-to-end critical failure path recoveries |
+| Webhook Idempotency | `src/__tests__/webhook-idempotency.test.ts` | 8 | In-flight isolation, duplicate event prevention |
+| Rate Limiting | `src/__tests__/rate-limit.test.ts` | 5 | Sliding-window eviction, header conformity |
 
-### 3. Supabase Row-Level Security (RLS) & Strict Fail-Closed Stored Procedures
-The PostgreSQL database runs in a zero-trust configuration with Row-Level Security enabled on all tables and strictly fail-closed transactional execution:
-
-- **Score Isolation**: Standard users can only `SELECT` their own scores (`auth.uid() = user_id`). Direct client `INSERT` is disabled.
-- **Strictly Fail-Closed `SECURITY DEFINER` RPCs**: All mutations must invoke vetted stored procedures that validate caller identity and lock rows inside the database transaction. If an RPC fails, the API strictly fails closed with an HTTP error—**zero unsafe service-role fallbacks or direct non-atomic bypasses exist**:
-  - `add_golf_score(p_user_id, p_score, p_date_played)`: Acquires a pessimistic row lock (`PERFORM ... FOR UPDATE`) on `public.users` to serialize concurrent submissions, validates Stableford bounds, counts existing records, and purges the oldest score if count $\ge 5$ in a single atomic transaction.
-  - `claim_checkout_lock(p_user_id)`: Imposes an atomic 5-minute checkout lock under row-lock to prevent race conditions and duplicate concurrent Stripe checkout sessions. If the lock cannot be claimed, session creation is strictly blocked.
-  - `publish_draw_atomic(p_draw_id, p_winners, p_rollover, p_actor_id)`: Atomically transitions a draw to `published`, purges draft records, bulk inserts winners, sets rollovers, and logs administrative audit trails in a single ACID transaction.
-  - `record_completed_donation(p_user_id, p_charity_id, p_amount, p_stripe_payment_id)`: Restricts execution to `service_role`, enforces `UNIQUE(stripe_payment_id)` idempotency, and updates charity contribution ledgers atomically.
-
----
-
-### 4. Stateful Stripe Webhook Idempotency & 300s In-Flight Isolation
-Stripe delivers webhooks via an "at-least-once" retry schedule. The webhook route handler ([`src/app/api/webhooks/stripe/route.ts`](file:///src/app/api/webhooks/stripe/route.ts)) implements a stateful idempotency ledger backed by `public.stripe_events`:
-
-1. **Signature Verification**: Validates `stripe-signature` against `STRIPE_WEBHOOK_SECRET` using `stripe.webhooks.constructEvent()`.
-2. **Stateful Event Claim (`claim_stripe_event`)**:
-   - If event status is `completed`, returns `DUPLICATE_COMPLETED` $\to$ immediate HTTP 200 OK.
-   - If event status is `processing` and age $< 300\text{s}$, returns `IN_FLIGHT` $\to$ immediate HTTP 200 OK to prevent concurrent duplicate execution.
-   - If event is fresh, records status as `processing` and grants execution claim (`CLAIMED`).
-   - If previous attempt failed or timed out ($> 300\text{s}$), re-claims event for safe retry.
-3. **Fail-Closed Execution**: If any database mutation fails, the event is marked `failed` and returns HTTP 500, prompting Stripe to retry according to its backoff schedule.
-4. **Finalization (`complete_stripe_event`)**: Once all business logic completes, status transitions to `completed`.
-
----
-
-### 5. Conserved Float-Free Integer Currency Arithmetic
-To eliminate JavaScript IEEE 754 floating-point drift (e.g. `0.1 + 0.2 = 0.30000000000000004`), all financial operations execute using integer subunits (paise / cents via `toCents` and `fromCents` in [`src/lib/utils/currency.ts`](file:///src/lib/utils/currency.ts)):
-
-$$\text{Prize Pool} = \text{Base Pool} + \text{Rollover From Previous Month}$$
-
-$$\text{Tier 1 (5-Match): } 40\% \quad | \quad \text{Tier 2 (4-Match): } 35\% \quad | \quad \text{Tier 3 (3-Match): } 25\%$$
-
-$$\text{Total Distributed} + \text{Rollover}_{\text{next}} \equiv \text{Total Prize Pool}$$
-
-Any unawarded tier allocations and integer division remainders roll over to the subsequent month's prize pool, guaranteeing complete mathematical pool conservation.
-
----
-
-### 6. Scorecard Verification Pipeline & Defensive Trigger Rules
-- **Winner Proof Update Guard**: A `BEFORE UPDATE` trigger on `public.draw_winners` restricts regular members to updating **only** `winner_proof_url` while `verification_status = 'pending'`.
-- **Field Immobility**: All financial and status fields (`prize_amount`, `match_type`, `verification_status`, `payout_status`) are strictly protected against non-admin mutation.
-- **Database CHECK Constraint**: `CONSTRAINT chk_draw_winners_payout_verified CHECK (payout_status != 'paid' OR verification_status = 'approved')` makes it physically impossible for PostgreSQL to store a `paid` winner without prior administrator verification approval.
-- **Charity Ledger Trigger**: The `protect_charity_contributions` trigger prevents manual updates to `charities.total_contributions`, restricting ledger increments to verified `service_role` RPCs.
-
----
-
-## 🔄 End-to-End Critical Path & Failure Recovery
-
-| Lifecycle Stage | Expected Behavior | Defensive Implementation & Invariants |
-| :--- | :--- | :--- |
-| **1. Payment succeeds $\to$ Webhook received** | Subscription activated / donation logged. | Cryptographic signature validation, `claim_stripe_event()`, customer cross-check. |
-| **2. Payment duplicated $\to$ No duplicate credit** | Member not double-charged; donation not duplicated. | `claim_checkout_lock()` blocks active members; `UNIQUE(stripe_payment_id)` prevents donation ledger inflation. |
-| **3. Webhook retries $\to$ Idempotent** | Safe acknowledgment without re-running business logic. | `claim_stripe_event()` recognizes `completed` status and returns 200 OK without mutations. |
-| **4. Draw succeeds $\to$ Prize accounting consistent** | Exact prize pool distribution without money loss. | Integer cents math; unawarded tier allocations and integer division remainders roll over to Month+1. |
-| **5. Payout fails $\to$ State recoverable** | State is uncorrupted if a payout or network call fails. | Fail-closed error handling; `payout_status` remains `pending` and can be safely retried from the Admin Panel. |
-
----
-
-## 💬 Architectural Q&A
-
-### Q1: Why is the Stripe webhook idempotent?
-> **Answer**: Stripe webhooks operate on an "at-least-once" delivery model. Network timeouts, slow database responses, or dropped connections can cause Stripe to retry delivering the exact same event multiple times. Without idempotency, a retried `checkout.session.completed` event could double-credit charity balances or create duplicate records. We enforce idempotency with a stateful `stripe_events` ledger and unique payment constraints so duplicate deliveries are recognized and safely acknowledged without re-executing business logic.
-
-### Q2: Why is authorization enforced server-side?
-> **Answer**: Client-side authorization checks (such as hiding UI buttons) can be trivially bypassed by inspecting JavaScript bundles or issuing direct HTTP requests. Enforcing authorization server-side in API route handlers (`assertAdminAPI()`) and inside the database layer (Supabase RLS and `SECURITY DEFINER` stored procedures) ensures that caller identity and permissions are authoritatively validated on every single mutation.
-
-### Q3: How does Row-Level Security (RLS) protect tenant/user data?
-> **Answer**: RLS operates at the PostgreSQL database engine level rather than relying on application code filters. When a query is executed, PostgreSQL evaluates the RLS policy against the authenticated caller's JWT (`auth.uid()`). This prevents horizontal privilege escalation (User A viewing or editing User B's scorecard) and vertical privilege escalation (a standard user updating their own role to admin or manually setting `payout_status = 'paid'`).
-
----
-
-## 🔌 API Route Reference
-
-| Endpoint | Method | Access Barrier | Rate Limit | Request Body / Query | Success Response | Status Codes |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| `/api/checkout` | `POST` | Authenticated | 5 / min | `{ plan: "monthly" \| "yearly" }` | `{ url: string }` | `200`, `400`, `401`, `409`, `429`, `500` |
-| `/api/billing` | `POST` | Authenticated | 5 / min | None | `{ url: string }` | `200`, `400`, `401`, `429`, `500` |
-| `/api/donations` | `POST` | Public / Auth | 5 / min | `{ charityId: UUID, amount: number }` | `{ url: string }` | `200`, `400`, `429`, `500` |
-| `/api/scores` | `GET` | Authenticated | Standard | Query params | `{ scores: GolfScore[] }` | `200`, `401`, `500` |
-| `/api/scores` | `POST` | Authenticated | 10 / min | `{ score: number, date_played: string }` | `{ score: GolfScore }` | `201`, `400`, `401`, `429`, `500` |
-| `/api/webhooks/stripe` | `POST` | Stripe Signature | Webhook | Stripe Event Payload | `{ received: true }` | `200`, `400`, `500` |
-| `/api/admin/charities` | `GET` | Admin Role | Standard | None | `{ charities: Charity[] }` | `200`, `401`, `403`, `500` |
-| `/api/admin/charities` | `POST` | Admin Role | Standard | `{ name, description, is_featured, ... }` | `{ charity: Charity }` | `201`, `400`, `401`, `403`, `500` |
-| `/api/admin/charities` | `PATCH` | Admin Role | Standard | `{ id, name, description, ... }` | `{ charity: Charity }` | `200`, `400`, `401`, `403`, `500` |
-| `/api/admin/charities` | `DELETE`| Admin Role | Standard | `?id=UUID` | `{ success: true }` | `200`, `400`, `401`, `403`, `409`, `500` |
-| `/api/admin/draws` | `GET` | Admin Role | Standard | None | `{ draws: Draw[] }` | `200`, `401`, `403`, `500` |
-| `/api/admin/draws` | `POST` | Admin Role | Standard | `{ action: "simulate" \| "publish" \| "lock" }` | `{ draw: Draw, result: ... }` | `200`, `400`, `401`, `403`, `500` |
-| `/api/admin/winners` | `GET` | Admin Role | Standard | `?draw_id=UUID` | `{ winners: WinnerDetail[] }` | `200`, `401`, `403`, `500` |
-| `/api/admin/winners` | `PATCH` | Admin Role | Standard | `{ winner_id, verification_status, payout_status }` | `{ winner: Winner }` | `200`, `400`, `401`, `403`, `500` |
-| `/api/admin/users` | `GET` | Admin Role | Standard | None | `{ users: UserProfile[] }` | `200`, `401`, `403`, `500` |
-
----
-
-## 🧪 Automated Test Suites (100 Tests)
-
-The repository features comprehensive unit, integration, and security regression test suites executed with **Vitest**:
-
-```
- ✓ src/__tests__/security-regression.test.ts   (30 tests)
- ✓ src/__tests__/validations.test.ts           (24 tests)
- ✓ src/__tests__/auth-security.test.ts         (13 tests)
- ✓ src/__tests__/draw.service.test.ts          (12 tests)
- ✓ src/__tests__/failure-path-recovery.test.ts  (8 tests)
- ✓ src/__tests__/webhook-idempotency.test.ts    (8 tests)
- ✓ src/__tests__/rate-limit.test.ts             (5 tests)
-
- Test Files  7 passed (7)
-      Tests  100 passed (100)
-```
-
-- [`src/__tests__/security-regression.test.ts`](file:///src/__tests__/security-regression.test.ts) (30 tests): Validates RLS boundaries, `SECURITY DEFINER` search path protections, 5-score FIFO pruning, direct mutation guards on `charities.total_contributions`, checkout concurrency lock behavior, strictly fail-closed RPC score submission, and fail-closed lock claim guards.
-- [`src/__tests__/validations.test.ts`](file:///src/__tests__/validations.test.ts) (24 tests): Tests Zod schema validation rules, boundary conditions, input sanitization, and helper type guards.
-- [`src/__tests__/auth-security.test.ts`](file:///src/__tests__/auth-security.test.ts) (13 tests): Validates admin privilege checks (`assertAdminAPI`), session identity matching, and role tampering prevention.
-- [`src/__tests__/draw.service.test.ts`](file:///src/__tests__/draw.service.test.ts) (12 tests): Validates CSPRNG / deterministic SHA-256 winning number generation, anti-inflation matching logic, and integer pool distribution.
-- [`src/__tests__/failure-path-recovery.test.ts`](file:///src/__tests__/failure-path-recovery.test.ts) (8 tests): Validates the 5-stage critical path (payment $\to$ duplicate prevention $\to$ webhook idempotency $\to$ prize accounting $\to$ payout failure recovery).
-- [`src/__tests__/webhook-idempotency.test.ts`](file:///src/__tests__/webhook-idempotency.test.ts) (8 tests): Validates stateful webhook claim transitions (`CLAIMED`, `IN_FLIGHT`, `DUPLICATE_COMPLETED`), 300s execution isolation, and retry safety.
-- [`src/__tests__/rate-limit.test.ts`](file:///src/__tests__/rate-limit.test.ts) (5 tests): Tests sliding-window eviction, client IP separation, RFC header generation, and HTTP 429 throttling.
-
----
-
-## 💻 Tech Stack
-
-- **Framework**: Next.js 16.2.0 (App Router, Server Components, Route Handlers)
-- **Runtime & Language**: Node.js 20.x, TypeScript 5
-- **Schema Validation**: Zod 3.24.2
-- **UI & Styling**: Vanilla CSS Design System with Curated Golf SaaS Palette
-- **Database & Auth**: Supabase PostgreSQL (Row-Level Security, Database Triggers, `SECURITY DEFINER` RPCs)
-- **Payments & Billing**: Stripe Subscriptions, Checkout Sessions, Customer Billing Portal, Webhook Handlers
-- **Testing**: Vitest 3.0.7
-- **Transactional Email**: Resend API
-
----
-
-## 🚀 Getting Started
-
-### 1. Prerequisites
-- Node.js 18.x or 20.x
-- npm 9+
-- A Supabase Project ([supabase.com](https://supabase.com))
-- A Stripe Account ([stripe.com](https://stripe.com))
-
-### 2. Environment Configuration
-Create a `.env.local` file in the root directory (see `.env.example`):
-
-```env
-# Public Variables (Browser Accessible)
-NEXT_PUBLIC_SUPABASE_URL=https://your-project-ref.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOi...
-NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_test_51...
-NEXT_PUBLIC_APP_URL=http://localhost:3000
-
-# Private Variables (Server-Only)
-SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOi...
-STRIPE_SECRET_KEY=sk_test_51...
-STRIPE_WEBHOOK_SECRET=whsec_...
-STRIPE_MONTHLY_PRICE_ID=price_1...
-STRIPE_YEARLY_PRICE_ID=price_1...
-RESEND_API_KEY=re_...
-EMAIL_FROM=Golf Platform <notifications@golfforgood.org>
-NODE_ENV=development
-```
-
-### 3. Database Setup
-Copy the contents of [`supabase/schema.sql`](file:///supabase/schema.sql) and execute it in your **Supabase SQL Editor** to provision all tables, triggers, indexes, and RLS policies.
-
-### 4. Running Locally
-```bash
-npm install
-npm run dev
-```
-Open [http://localhost:3000](http://localhost:3000) in your browser.
-
-### 5. Running the Test Suite
 ```bash
 npm test
 ```
 
 ---
 
-## 🛠️ Step-by-Step Git Commands (Clean Commit History)
+## Getting Started
 
-### Commit 1: Zod Schema Integration
-```bash
-git add src/lib/validations/index.ts src/__tests__/validations.test.ts
-git commit -m "feat(validations): wire Zod schemas with safeParse and inferred types"
+### Prerequisites
+- Node.js 18+ or 20+
+- npm 9+
+- A Supabase account and project
+- A Stripe account (Test Mode supported)
+
+### Environment Configuration
+Create a `.env.local` file in the project root:
+
+```env
+# Public Client Variables
+NEXT_PUBLIC_SUPABASE_URL=https://your-project-ref.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your-supabase-anon-key
+NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_test_...
+NEXT_PUBLIC_APP_URL=http://localhost:3000
+
+# Server-Only Variables
+SUPABASE_SERVICE_ROLE_KEY=your-supabase-service-role-key
+STRIPE_SECRET_KEY=sk_test_...
+STRIPE_WEBHOOK_SECRET=whsec_...
+STRIPE_MONTHLY_PRICE_ID=price_...
+STRIPE_YEARLY_PRICE_ID=price_...
+RESEND_API_KEY=re_...
+EMAIL_FROM=Golf Platform <notifications@golfforgood.org>
 ```
 
-### Commit 2: Sliding-Window Rate Limiter
+| Variable | Scope | Description |
+| :--- | :--- | :--- |
+| `NEXT_PUBLIC_SUPABASE_URL` | Public | Supabase project API URL |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Public | Supabase anonymous API key for client queries |
+| `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` | Public | Stripe publishable key for client elements |
+| `NEXT_PUBLIC_APP_URL` | Public | Base application URL for Stripe redirect URLs |
+| `SUPABASE_SERVICE_ROLE_KEY` | Server | Service role key for admin operations and webhook RPCs |
+| `STRIPE_SECRET_KEY` | Server | Stripe API secret key for session creation and billing |
+| `STRIPE_WEBHOOK_SECRET` | Server | Secret for cryptographic verification of webhook signatures |
+| `STRIPE_MONTHLY_PRICE_ID` | Server | Stripe Price ID for ₹499/month recurring plan |
+| `STRIPE_YEARLY_PRICE_ID` | Server | Stripe Price ID for ₹4,999/year recurring plan |
+| `RESEND_API_KEY` | Server | Resend API key for transactional email delivery |
+| `EMAIL_FROM` | Server | Sender email header for system notifications |
+
+### Database Migration
+Execute the SQL migration file in your Supabase SQL Editor:
+- File: [`supabase/schema.sql`](file:///supabase/schema.sql)
+
+This provisions all required tables, triggers, indexes, and Row-Level Security policies.
+
+### Local Development
 ```bash
-git add src/lib/rate-limit.ts src/app/api/scores/route.ts src/app/api/checkout/route.ts src/app/api/donations/route.ts src/app/api/billing/route.ts src/__tests__/rate-limit.test.ts
-git commit -m "feat(security): implement sliding-window rate limiting on mutation endpoints"
+# Install dependencies
+npm install
+
+# Start development server
+npm run dev
 ```
 
-### Commit 3: Scaffolding Cleanup
-```bash
-git rm AGENTS.md
-git commit -m "chore(cleanup): remove AGENTS.md scaffolding artifact"
-```
+Visit [http://localhost:3000](http://localhost:3000) in your browser.
 
-### Commit 4: Architecture Diagrams & Enterprise Documentation
+### Local Stripe Webhook Forwarding
+To test Stripe checkout and recurring subscription webhooks locally:
 ```bash
-git add README.md
-git commit -m "docs(architecture): upgrade system diagrams to multi-tier Mermaid and elevate README specifications"
+# Forward incoming webhooks to your local server
+stripe listen --forward-to localhost:3000/api/webhooks/stripe
 ```
+Copy the webhook signing secret output by the CLI and assign it to `STRIPE_WEBHOOK_SECRET` in `.env.local`.
 
 ---
 
-## 📄 License & Disclaimer
+## Tech Stack Summary
 
-This project is open source and built for educational and portfolio demonstration purposes as a simulated golf charity subscription platform. It is not intended for operational commercial gambling or real-money lottery operations.
+- **Frontend**: Next.js 16.2 (App Router, Server & Client Components), React 19, Vanilla CSS Design System
+- **Backend & APIs**: Next.js Route Handlers, Zod Runtime Validation
+- **Database & Auth**: Supabase PostgreSQL, Row-Level Security, Database Functions (`SECURITY DEFINER`), Database Triggers
+- **Payments & Invoicing**: Stripe Subscriptions, Checkout Sessions, Customer Billing Portal, Webhook Handlers
+- **Testing**: Vitest
+- **Communications**: Resend API
+
+---
+
+## License & Disclaimer
+
+This project is open-source and built for educational and portfolio demonstration purposes. The monthly prize draws and prize calculations are simulated mechanisms designed to showcase full-stack software architecture and financial integrity patterns.
