@@ -52,41 +52,23 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      // Fallback: direct table check via service role if RPC is not provisioned or schema cache not reloaded
-      const { data: userProfile, error: profileErr } = await adminDb
-        .from('users')
-        .select('subscription_status, checkout_lock_until')
-        .eq('id', user.id)
-        .single();
-
-      if (!profileErr && userProfile) {
-        if (userProfile.subscription_status === 'active') {
-          return NextResponse.json(
-            { error: 'You already have an active subscription. Please manage your plan in the Billing Portal.' },
-            { status: 400 }
-          );
-        }
-        if (userProfile.checkout_lock_until && new Date(userProfile.checkout_lock_until) > new Date()) {
-          return NextResponse.json(
-            { error: 'A checkout session is already in progress. Please complete your payment or try again in a few minutes.' },
-            { status: 409 }
-          );
-        }
-        // Claim lock via direct update
-        const lockExpiry = new Date(Date.now() + 5 * 60 * 1000).toISOString();
-        await adminDb.from('users').update({ checkout_lock_until: lockExpiry }).eq('id', user.id);
-      } else if (profileErr && !isAlreadyInProgress && !isAlreadyActive) {
-        // Log warning and proceed gracefully
-        console.warn('Checkout lock check bypassed due to profile query issue:', profileErr.message);
-      }
+      // Fail-Closed: Strictly reject checkout initiation if atomic lock cannot be acquired
+      return NextResponse.json(
+        { error: `Database error acquiring checkout lock: ${lockError.message}` },
+        { status: 500 }
+      );
     }
 
     // 2. Fetch user profile for customer binding
-    const { data: profile } = await adminDb
+    const { data: profile, error: profileErr } = await adminDb
       .from('users')
       .select('stripe_customer_id, email, full_name')
       .eq('id', user.id)
       .single();
+
+    if (profileErr) {
+      throw new Error(`Failed to load user profile: ${profileErr.message}`);
+    }
 
     let customerId = profile?.stripe_customer_id;
 
@@ -98,9 +80,13 @@ export async function POST(request: NextRequest) {
       });
       customerId = customer.id;
 
-      await adminDb.from('users').update({
+      const { error: customerUpdateErr } = await adminDb.from('users').update({
         stripe_customer_id: customerId,
       }).eq('id', user.id);
+
+      if (customerUpdateErr) {
+        throw new Error(`Failed to bind Stripe customer ID: ${customerUpdateErr.message}`);
+      }
     }
 
     // Fail closed if Stripe price ID is unconfigured or placeholder
@@ -136,7 +122,8 @@ export async function POST(request: NextRequest) {
       const supabase = await createClient();
       const { data: { user } } = await supabase.auth.getUser();
       if (user?.id) {
-        await supabase.from('users').update({ checkout_lock_until: null }).eq('id', user.id);
+        const adminDb = createAdminClient();
+        await adminDb.from('users').update({ checkout_lock_until: null }).eq('id', user.id);
       }
     } catch {
       // Best-effort cleanup

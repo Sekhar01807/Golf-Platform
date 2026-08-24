@@ -37,57 +37,18 @@ export async function POST(request: NextRequest) {
     });
 
     if (claimErr) {
-      // Fallback to direct table stateful check if RPC is not yet provisioned
-      const { data: existingEvent, error: selectErr } = await supabase
-        .from('stripe_events')
-        .select('id, status, created_at')
-        .eq('id', event.id)
-        .single();
-
-      if (!selectErr && existingEvent) {
-        if (existingEvent.status === 'completed') {
-          return NextResponse.json({ received: true, duplicate: true });
-        }
-        const isRecent = existingEvent.created_at && (Date.now() - new Date(existingEvent.created_at).getTime()) < 300000;
-        if (existingEvent.status === 'processing' && isRecent) {
-          return NextResponse.json({ received: true, in_flight: true });
-        }
-        // Stale or failed attempt: re-claim for retry
-        const { error: reclaimErr } = await supabase
-          .from('stripe_events')
-          .update({ status: 'processing', created_at: new Date().toISOString() })
-          .eq('id', event.id);
-
-        if (reclaimErr) {
-          return NextResponse.json({ error: 'Database idempotency claim failed' }, { status: 500 });
-        }
-      } else {
-        const { error: insertErr } = await supabase.from('stripe_events').insert({
-          id: event.id,
-          event_type: event.type,
-          status: 'processing',
-        });
-
-        if (insertErr) {
-          if (insertErr.code === '23505') {
-            const { data: dupRecord } = await supabase.from('stripe_events').select('status').eq('id', event.id).single();
-            if (dupRecord?.status === 'completed') {
-              return NextResponse.json({ received: true, duplicate: true });
-            }
-          }
-          return NextResponse.json({ error: 'Database idempotency claim failed' }, { status: 500 });
-        }
-      }
-    } else {
-      if (claimStatus === 'DUPLICATE_COMPLETED') {
-        return NextResponse.json({ received: true, duplicate: true });
-      }
-      if (claimStatus === 'IN_FLIGHT') {
-        return NextResponse.json({ received: true, in_flight: true });
-      }
+      console.error('Database idempotency claim RPC error:', claimErr.message);
+      return NextResponse.json({ error: `Database idempotency claim failed: ${claimErr.message}` }, { status: 500 });
     }
-  } catch {
-    return NextResponse.json({ error: 'Database idempotency claim exception' }, { status: 500 });
+
+    if (claimStatus === 'DUPLICATE_COMPLETED') {
+      return NextResponse.json({ received: true, duplicate: true });
+    }
+    if (claimStatus === 'IN_FLIGHT') {
+      return NextResponse.json({ received: true, in_flight: true });
+    }
+  } catch (err: any) {
+    return NextResponse.json({ error: err?.message || 'Database idempotency claim exception' }, { status: 500 });
   }
 
   // ── 2. Execute Financial & Business Operations (Fail-Closed) ──
@@ -306,24 +267,14 @@ export async function POST(request: NextRequest) {
     // ── 3. Mark Event Completed Only After Business Operation Succeeded ──
     const { error: completeErr } = await supabase.rpc('complete_stripe_event', { p_event_id: event.id });
     if (completeErr) {
-      const { error: directUpdateErr } = await supabase.from('stripe_events').update({
-        status: 'completed',
-        processed_at: new Date().toISOString(),
-      }).eq('id', event.id);
-
-      if (directUpdateErr) {
-        throw new Error(`Failed to record stripe event completion: ${directUpdateErr.message}`);
-      }
+      throw new Error(`Failed to record stripe event completion: ${completeErr.message}`);
     }
 
     return NextResponse.json({ received: true });
   } catch (handlerErr: any) {
-    // Mark event as failed in database so subsequent Stripe retry will re-claim and re-execute
+    // Fail-closed: mark event as failed in database so subsequent Stripe retry will re-claim and re-execute
     try {
-      const { error: failErr } = await supabase.rpc('fail_stripe_event', { p_event_id: event.id });
-      if (failErr) {
-        await supabase.from('stripe_events').update({ status: 'failed' }).eq('id', event.id);
-      }
+      await supabase.rpc('fail_stripe_event', { p_event_id: event.id });
     } catch {
       // Best-effort cleanup
     }
