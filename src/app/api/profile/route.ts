@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
-import { createAdminClient } from '@/lib/supabase/admin';
 import { enforceRateLimit } from '@/lib/rate-limit';
 
 export async function GET() {
@@ -16,28 +15,21 @@ export async function GET() {
       return NextResponse.json({ error: 'Unauthorized: Please sign in.' }, { status: 401 });
     }
 
-    const adminDb = createAdminClient();
-
-    // Fetch user profile from public.users
-    let { data: profile, error: profileErr } = await supabase
+    // Fetch user profile from public.users via authenticated client (RLS policy: Users can read own profile)
+    const { data: profile, error: profileErr } = await supabase
       .from('users')
       .select('full_name, email, role, subscription_status, subscription_plan, subscription_start_date, subscription_end_date, selected_charity_id, charity_contribution_percentage, created_at')
       .eq('id', user.id)
       .single();
 
-    if (profileErr || !profile) {
-      const { data: adminProfile } = await adminDb
-        .from('users')
-        .select('full_name, email, role, subscription_status, subscription_plan, subscription_start_date, subscription_end_date, selected_charity_id, charity_contribution_percentage, created_at')
-        .eq('id', user.id)
-        .single();
-      profile = adminProfile;
+    if (profileErr && profileErr.code !== 'PGRST116') {
+      return NextResponse.json({ error: `Failed to load profile: ${profileErr.message}` }, { status: 500 });
     }
 
-    // Fetch selected charity details if any
+    // Fetch selected charity details if any via authenticated client (RLS policy: Public read charities)
     let charityName = null;
     if (profile?.selected_charity_id) {
-      const { data: charity } = await adminDb
+      const { data: charity } = await supabase
         .from('charities')
         .select('name')
         .eq('id', profile.selected_charity_id)
@@ -45,8 +37,8 @@ export async function GET() {
       if (charity) charityName = charity.name;
     }
 
-    // Fetch verified scores count and records
-    const { data: scores } = await adminDb
+    // Fetch verified scores count and records via authenticated client (RLS policy: Users read own scores)
+    const { data: scores } = await supabase
       .from('golf_scores')
       .select('id, score, date_played, created_at')
       .eq('user_id', user.id)
@@ -90,9 +82,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json().catch(() => ({}));
     const { fullName, phone, golfProfile, preferences, notifications, profileVisibility } = body;
 
-    const adminDb = createAdminClient();
-
-    // 1. Update public.users record
+    // 1. Update public.users record via authenticated client (RLS & trigger protected)
     const updates: Record<string, any> = {
       updated_at: new Date().toISOString(),
     };
@@ -101,7 +91,17 @@ export async function POST(request: NextRequest) {
       updates.full_name = fullName.trim().slice(0, 100);
     }
 
-    await adminDb.from('users').update(updates).eq('id', user.id);
+    const { error: updateErr } = await supabase
+      .from('users')
+      .update(updates)
+      .eq('id', user.id);
+
+    if (updateErr) {
+      return NextResponse.json(
+        { error: `Failed to update profile in database: ${updateErr.message}` },
+        { status: 500 }
+      );
+    }
 
     // 2. Update Supabase Auth metadata for seamless client-side session sync
     const metadataUpdates: Record<string, any> = { ...user.user_metadata };
@@ -112,9 +112,16 @@ export async function POST(request: NextRequest) {
     if (notifications !== undefined) metadataUpdates.notifications = notifications;
     if (profileVisibility !== undefined) metadataUpdates.profile_visibility = profileVisibility;
 
-    await supabase.auth.updateUser({
+    const { error: metaErr } = await supabase.auth.updateUser({
       data: metadataUpdates,
     });
+
+    if (metaErr) {
+      return NextResponse.json(
+        { error: `Failed to sync user session metadata: ${metaErr.message}` },
+        { status: 500 }
+      );
+    }
 
     // 3. Purge all Next.js server caches for affected dashboard pages
     try {

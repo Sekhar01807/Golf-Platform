@@ -1,5 +1,4 @@
 import { createClient } from '@/lib/supabase/server';
-import { createAdminClient } from '@/lib/supabase/admin';
 import Link from 'next/link';
 import { ScorecardIcon, HeartIcon, TicketIcon, CrownIcon } from '@/components/Icons/Icons';
 import { getMembershipDetails } from '@/lib/utils/subscription';
@@ -36,23 +35,12 @@ export default async function DashboardOverview({
   });
 
   if (user) {
-    const adminDb = createAdminClient();
-
-    // Fetch user profile with live subscription fields
-    let { data: profile, error: profileErr } = await supabase
+    // Fetch user profile with live subscription fields via authenticated user client
+    const { data: profile } = await supabase
       .from('users')
       .select('full_name, subscription_status, subscription_plan, subscription_end_date')
       .eq('id', user.id)
       .single();
-
-    if (profileErr || !profile) {
-      const { data: adminProfile } = await adminDb
-        .from('users')
-        .select('full_name, subscription_status, subscription_plan, subscription_end_date')
-        .eq('id', user.id)
-        .single();
-      profile = adminProfile;
-    }
 
     if (profile) {
       userName = profile.full_name || user.email?.split('@')[0] || 'Golfer';
@@ -63,7 +51,7 @@ export default async function DashboardOverview({
       });
     }
 
-    // Count scores with admin fallback
+    // Count scores via authenticated client (RLS policy: Users read own scores)
     const { count, error: countErr } = await supabase
       .from('golf_scores')
       .select('*', { count: 'exact', head: true })
@@ -71,15 +59,9 @@ export default async function DashboardOverview({
 
     if (!countErr && count !== null && count !== undefined) {
       scoresCount = count;
-    } else {
-      const { count: adminCount } = await adminDb
-        .from('golf_scores')
-        .select('*', { count: 'exact', head: true })
-        .eq('user_id', user.id);
-      scoresCount = adminCount || 0;
     }
 
-    // Sum winnings with admin fallback
+    // Sum winnings via authenticated client (RLS policy: Users read own winnings)
     const { data: winnings, error: winErr } = await supabase
       .from('draw_winners')
       .select('prize_amount')
@@ -87,15 +69,9 @@ export default async function DashboardOverview({
 
     if (!winErr && winnings) {
       totalWon = winnings.reduce((sum, w) => sum + Number(w.prize_amount || 0), 0);
-    } else {
-      const { data: adminWinnings } = await adminDb
-        .from('draw_winners')
-        .select('prize_amount')
-        .eq('user_id', user.id);
-      totalWon = adminWinnings?.reduce((sum, w) => sum + Number(w.prize_amount || 0), 0) || 0;
     }
 
-    // Fetch recent scores with admin fallback
+    // Fetch recent scores via authenticated client
     const { data: scores, error: scoresErr } = await supabase
       .from('golf_scores')
       .select('score, date_played')
@@ -105,14 +81,6 @@ export default async function DashboardOverview({
 
     if (!scoresErr && scores) {
       recentScores = scores;
-    } else {
-      const { data: adminScores } = await adminDb
-        .from('golf_scores')
-        .select('score, date_played')
-        .eq('user_id', user.id)
-        .order('date_played', { ascending: false })
-        .limit(5);
-      recentScores = adminScores || [];
     }
   }
 

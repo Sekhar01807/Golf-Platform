@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
-import { createAdminClient } from '@/lib/supabase/admin';
 import { enforceRateLimit } from '@/lib/rate-limit';
 
 export async function POST(request: NextRequest) {
@@ -31,10 +30,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Charity contribution rate must be between 10% and 50%' }, { status: 400 });
     }
 
-    const adminDb = createAdminClient();
-
-    // Verify charity exists
-    const { data: charity, error: charityErr } = await adminDb
+    // Verify charity exists via authenticated client (RLS policy: Public read charities)
+    const { data: charity, error: charityErr } = await supabase
       .from('charities')
       .select('id, name')
       .eq('id', selectedCharityId)
@@ -44,8 +41,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Selected charity was not found in active directory' }, { status: 404 });
     }
 
-    // Update public.users record
-    const { error: updateErr } = await adminDb
+    // Update public.users record via authenticated client (RLS & trigger protected)
+    const { error: updateErr } = await supabase
       .from('users')
       .update({
         selected_charity_id: selectedCharityId,
@@ -55,7 +52,10 @@ export async function POST(request: NextRequest) {
       .eq('id', user.id);
 
     if (updateErr) {
-      return NextResponse.json({ error: updateErr.message || 'Failed to update charity preference' }, { status: 500 });
+      return NextResponse.json(
+        { error: updateErr.message || 'Failed to update charity preference in database' },
+        { status: 500 }
+      );
     }
 
     // Purge caches
