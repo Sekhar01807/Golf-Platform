@@ -2,9 +2,25 @@ import { NextRequest, NextResponse } from 'next/server';
 
 /**
  * ══════════════════════════════════════════════════════════════════════════════
- * In-Memory Sliding-Window Rate Limiter
- * Provides application-level throttling for sensitive endpoints (auth, scores, checkout)
- * with standard RFC rate limit headers (Retry-After, X-RateLimit-*).
+ * Application-Level Sliding-Window Rate Limiter
+ * ══════════════════════════════════════════════════════════════════════════════
+ * 
+ * Architecture & Deployment Model:
+ * --------------------------------
+ * 1. Single-Instance / Containerized:
+ *    Uses an in-memory `Map<string, number[]>` sliding-window store. Provides
+ *    sub-millisecond zero-network latency without external dependencies.
+ *    Optimal for single-node deployments, self-hosted Docker containers, and test suites.
+ * 
+ * 2. Distributed / Multi-Region Serverless (Production Roadmap):
+ *    In multi-region serverless or auto-scaled environments (e.g., Vercel Edge / AWS Lambda),
+ *    the rate limiter interface (`RateLimiterStore`) can be backed by a centralized
+ *    Redis instance (e.g., Upstash Redis via REST API / sliding-window Lua scripts).
+ * 
+ * Features:
+ * - Sliding-window timestamp eviction for smooth burst control (no boundary spikes)
+ * - Granular per-endpoint key prefixing (`scores`, `checkout`, `donations`, `billing`)
+ * - RFC-compliant response headers (`Retry-After`, `X-RateLimit-*`)
  * ══════════════════════════════════════════════════════════════════════════════
  */
 
@@ -22,7 +38,18 @@ export interface RateLimitResult {
   retryAfterSeconds: number;
 }
 
-export class SlidingWindowRateLimiter {
+/**
+ * Pluggable store interface supporting both in-memory and distributed backends (e.g. Redis)
+ */
+export interface RateLimiterStore {
+  check(identifier: string, limit: number, windowMs: number, now?: number): RateLimitResult | Promise<RateLimitResult>;
+  reset(identifier?: string): void | Promise<void>;
+}
+
+/**
+ * In-memory sliding-window rate limiter implementation
+ */
+export class SlidingWindowRateLimiter implements RateLimiterStore {
   private requests: Map<string, number[]> = new Map();
 
   constructor(private defaultLimit = 10, private defaultWindowMs = 60000) {}
