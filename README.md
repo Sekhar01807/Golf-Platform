@@ -6,7 +6,7 @@
 [![Zod](https://img.shields.io/badge/Zod-3.24.2-3068B7?style=flat-square&logo=zod&logoColor=white)](https://zod.dev/)
 [![Supabase](https://img.shields.io/badge/Supabase-PostgreSQL%20%2B%20RLS-3ECF8E?style=flat-square&logo=supabase&logoColor=white)](https://supabase.com/)
 [![Stripe](https://img.shields.io/badge/Stripe-Subscriptions%20%26%20Webhooks-635BFF?style=flat-square&logo=stripe&logoColor=white)](https://stripe.com/)
-[![Vitest](https://img.shields.io/badge/Vitest-97%20Automated%20Tests%20Passing-6E9F18?style=flat-square&logo=vitest&logoColor=white)](https://vitest.dev/)
+[![Vitest](https://img.shields.io/badge/Vitest-100%20Automated%20Tests%20Passing-6E9F18?style=flat-square&logo=vitest&logoColor=white)](https://vitest.dev/)
 
 > **An enterprise-grade full-stack SaaS platform combining athletic golf score tracking, verified charitable contributions, and simulated skill-based monthly prize draws.** Built with Next.js 16 (App Router), React 19, TypeScript, Zod Schema Validation, Supabase (PostgreSQL with Row-Level Security, database triggers, and atomic `SECURITY DEFINER` stored procedures), and Stripe Billing.
 
@@ -30,7 +30,7 @@
 - 🏆 **Athletic Score Tracking**: Members submit authentic golf rounds (1–45 Stableford points) with a strict 5-round FIFO history and proof scorecard uploads.
 - 💚 **Philanthropic Allocation**: 10%–50% of membership dues and direct donations route to partner causes with real-time transparent ledgers.
 - 🎰 **Simulated Prize Draws**: Monthly draws allocate 40% (Jackpot), 35%, and 25% across 5-match, 4-match, and 3-match score tiers, conserving all residual funds into rolling jackpots.
-- 🛡️ **Technical Robustness**: Powered by Zod schema validation, sliding-window rate limiting, Supabase Row-Level Security (RLS), server-side role authorization, Stripe webhook signature verification, stateful idempotency with in-flight lock isolation, transactional PostgreSQL stored procedures (`SECURITY DEFINER`), and immutable administrative audit logs.
+- 🛡️ **Technical Robustness**: Powered by Zod schema validation, sliding-window rate limiting, Supabase Row-Level Security (RLS), server-side role authorization, Stripe webhook signature verification, stateful idempotency with in-flight lock isolation, strictly fail-closed transactional PostgreSQL stored procedures (`SECURITY DEFINER`), and immutable administrative audit logs.
 
 ---
 
@@ -416,7 +416,7 @@ const { score, date_played } = parseResult.data; // Fully typed ScoreInput
 ---
 
 ### 2. Application-Level Sliding-Window Rate Limiting
-To defend against automated scraping, credential abuse, and concurrency spam, the platform implements an in-memory sliding-window rate limiter ([`src/lib/rate-limit.ts`](file:///src/lib/rate-limit.ts)).
+To defend against automated scraping, credential abuse, and concurrency spam, the platform implements an application-level sliding-window rate limiter ([`src/lib/rate-limit.ts`](file:///src/lib/rate-limit.ts)).
 
 - **Granular Endpoint Policies**:
   - `POST /api/scores`: Max 10 requests / 60 seconds
@@ -428,16 +428,19 @@ To defend against automated scraping, credential abuse, and concurrency spam, th
   - `X-RateLimit-Remaining`: Remaining request capacity.
   - `X-RateLimit-Reset`: Unix timestamp when the window resets.
   - `Retry-After`: Delta seconds to wait when HTTP 429 is returned.
+- **Architectural Model & Multi-Region Roadmap**:
+  - **Single-Node / Containerized (Default)**: In-memory `Map<string, number[]>` sliding-window store providing zero-network latency, sub-millisecond execution, and zero external infrastructure dependencies.
+  - **Distributed Multi-Region Deployment (Pluggable)**: Exposes a standardized `RateLimiterStore` interface (`check`, `reset`) designed for seamless drop-in integration with distributed Redis backends (e.g. Upstash Redis atomic Lua scripts / REST pipeline) for horizontally scaled serverless edge networks.
 
 ---
 
-### 3. Supabase Row-Level Security (RLS) & Stored Procedure Encapsulation
-The PostgreSQL database runs in a zero-trust configuration with Row-Level Security enabled on all tables:
+### 3. Supabase Row-Level Security (RLS) & Strict Fail-Closed Stored Procedures
+The PostgreSQL database runs in a zero-trust configuration with Row-Level Security enabled on all tables and strictly fail-closed transactional execution:
 
 - **Score Isolation**: Standard users can only `SELECT` their own scores (`auth.uid() = user_id`). Direct client `INSERT` is disabled.
-- **`SECURITY DEFINER` RPCs**: Modifications must invoke vetted stored procedures that validate caller identity inside the database transaction:
-  - `add_golf_score(p_user_id, p_score, p_date_played)`: Acquires a row lock (`PERFORM ... FOR UPDATE`) on `public.users` to prevent concurrency races, validates Stableford bounds, counts existing records, and purges the oldest score if count $\ge 5$.
-  - `claim_checkout_lock(p_user_id)`: Imposes a 5-minute atomic checkout lock to prevent duplicate concurrent Stripe checkout sessions.
+- **Strictly Fail-Closed `SECURITY DEFINER` RPCs**: All mutations must invoke vetted stored procedures that validate caller identity and lock rows inside the database transaction. If an RPC fails, the API strictly fails closed with an HTTP error—**zero unsafe service-role fallbacks or direct non-atomic bypasses exist**:
+  - `add_golf_score(p_user_id, p_score, p_date_played)`: Acquires a pessimistic row lock (`PERFORM ... FOR UPDATE`) on `public.users` to serialize concurrent submissions, validates Stableford bounds, counts existing records, and purges the oldest score if count $\ge 5$ in a single atomic transaction.
+  - `claim_checkout_lock(p_user_id)`: Imposes an atomic 5-minute checkout lock under row-lock to prevent race conditions and duplicate concurrent Stripe checkout sessions. If the lock cannot be claimed, session creation is strictly blocked.
   - `publish_draw_atomic(p_draw_id, p_winners, p_rollover, p_actor_id)`: Atomically transitions a draw to `published`, purges draft records, bulk inserts winners, sets rollovers, and logs administrative audit trails in a single ACID transaction.
   - `record_completed_donation(p_user_id, p_charity_id, p_amount, p_stripe_payment_id)`: Restricts execution to `service_role`, enforces `UNIQUE(stripe_payment_id)` idempotency, and updates charity contribution ledgers atomically.
 
@@ -525,12 +528,12 @@ Any unawarded tier allocations and integer division remainders roll over to the 
 
 ---
 
-## 🧪 Automated Test Suites (97 Tests)
+## 🧪 Automated Test Suites (100 Tests)
 
 The repository features comprehensive unit, integration, and security regression test suites executed with **Vitest**:
 
 ```
- ✓ src/__tests__/security-regression.test.ts   (27 tests)
+ ✓ src/__tests__/security-regression.test.ts   (30 tests)
  ✓ src/__tests__/validations.test.ts           (24 tests)
  ✓ src/__tests__/auth-security.test.ts         (13 tests)
  ✓ src/__tests__/draw.service.test.ts          (12 tests)
@@ -539,10 +542,10 @@ The repository features comprehensive unit, integration, and security regression
  ✓ src/__tests__/rate-limit.test.ts             (5 tests)
 
  Test Files  7 passed (7)
-      Tests  97 passed (97)
+      Tests  100 passed (100)
 ```
 
-- [`src/__tests__/security-regression.test.ts`](file:///src/__tests__/security-regression.test.ts) (27 tests): Validates RLS boundaries, `SECURITY DEFINER` search path protections, 5-score FIFO pruning, direct mutation guards on `charities.total_contributions`, and checkout concurrency lock behavior.
+- [`src/__tests__/security-regression.test.ts`](file:///src/__tests__/security-regression.test.ts) (30 tests): Validates RLS boundaries, `SECURITY DEFINER` search path protections, 5-score FIFO pruning, direct mutation guards on `charities.total_contributions`, checkout concurrency lock behavior, strictly fail-closed RPC score submission, and fail-closed lock claim guards.
 - [`src/__tests__/validations.test.ts`](file:///src/__tests__/validations.test.ts) (24 tests): Tests Zod schema validation rules, boundary conditions, input sanitization, and helper type guards.
 - [`src/__tests__/auth-security.test.ts`](file:///src/__tests__/auth-security.test.ts) (13 tests): Validates admin privilege checks (`assertAdminAPI`), session identity matching, and role tampering prevention.
 - [`src/__tests__/draw.service.test.ts`](file:///src/__tests__/draw.service.test.ts) (12 tests): Validates CSPRNG / deterministic SHA-256 winning number generation, anti-inflation matching logic, and integer pool distribution.
