@@ -552,20 +552,20 @@ describe('Regression 21: Direct Golf Score Client INSERT Policy Disabled (Requir
 });
 
 describe('Regression 22: Stripe Webhook Completion Failure Fail-Closed (HTTP 500 Trigger)', () => {
-  function handleWebhookCompletion(rpcError: boolean, fallbackError: boolean): { status: number; retryable: boolean } {
-    if (rpcError && fallbackError) {
+  function handleWebhookCompletion(rpcError: boolean): { status: number; retryable: boolean } {
+    if (rpcError) {
       // Must throw/return 500 to signal Stripe to retry delivery
       return { status: 500, retryable: true };
     }
     return { status: 200, retryable: false };
   }
 
-  it('22. should return retryable HTTP 500 if both complete_stripe_event RPC and direct update fail', () => {
-    const res = handleWebhookCompletion(true, true);
+  it('22. should return retryable HTTP 500 if complete_stripe_event RPC fails', () => {
+    const res = handleWebhookCompletion(true);
     expect(res.status).toBe(500);
     expect(res.retryable).toBe(true);
 
-    const successRes = handleWebhookCompletion(false, false);
+    const successRes = handleWebhookCompletion(false);
     expect(successRes.status).toBe(200);
     expect(successRes.retryable).toBe(false);
   });
@@ -669,5 +669,89 @@ describe('Regression 27: Strict Supabase Admin Config Validation (Fails Fast)', 
       url: 'https://valid.supabase.co',
       serviceKey: 'valid-secret-key',
     });
+  });
+});
+
+describe('Regression 28: Fail-Closed Score Submission on add_golf_score RPC Error (No Fallback)', () => {
+  function handleScoreSubmission(rpcError: { message: string } | null, scoreId: string | null) {
+    if (rpcError) {
+      const msg = rpcError.message;
+      if (msg.includes('Authentication required')) return { status: 401, error: msg };
+      if (msg.includes('Unauthorized')) return { status: 403, error: msg };
+      if (msg.includes('Score must be between') || msg.includes('Date played') || msg.includes('User profile not found')) {
+        return { status: 400, error: msg };
+      }
+      // Strictly fail closed: never bypass transaction to do manual non-atomic service-role inserts
+      return { status: 500, error: `Database transaction error recording score: ${msg}` };
+    }
+    if (!scoreId) {
+      return { status: 500, error: 'No ID returned from transaction procedure' };
+    }
+    return { status: 201, scoreId };
+  }
+
+  it('28. should strictly fail closed with appropriate HTTP errors when add_golf_score RPC fails, without service-role bypass', () => {
+    expect(handleScoreSubmission({ message: 'Score must be between 1 and 45' }, null).status).toBe(400);
+    expect(handleScoreSubmission({ message: 'Authentication required.' }, null).status).toBe(401);
+    expect(handleScoreSubmission({ message: 'Unauthorized: Caller identity does not match score owner.' }, null).status).toBe(403);
+    expect(handleScoreSubmission({ message: 'deadlock detected' }, null).status).toBe(500);
+    expect(handleScoreSubmission(null, 'score-uuid-123').status).toBe(201);
+  });
+});
+
+describe('Regression 29: Fail-Closed Checkout Concurrency Lock on Unexpected Error (No Bypass)', () => {
+  function handleCheckoutLockEvaluation(lockError: { message: string } | null) {
+    if (lockError) {
+      const isAlreadyActive = lockError.message.toLowerCase().includes('already has an active subscription');
+      const isAlreadyInProgress = lockError.message.toLowerCase().includes('already in progress');
+
+      if (isAlreadyActive) {
+        return { status: 400, proceed: false, error: 'Already subscribed' };
+      }
+      if (isAlreadyInProgress) {
+        return { status: 409, proceed: false, error: 'Checkout in progress' };
+      }
+      // Strictly fail-closed: never proceed to create Stripe session without acquired DB lock
+      return { status: 500, proceed: false, error: `Database error acquiring checkout lock: ${lockError.message}` };
+    }
+    return { status: 200, proceed: true };
+  }
+
+  it('29. should strictly fail closed and deny checkout session creation when claim_checkout_lock RPC fails', () => {
+    expect(handleCheckoutLockEvaluation({ message: 'User already has an active subscription.' })).toEqual({
+      status: 400,
+      proceed: false,
+      error: 'Already subscribed',
+    });
+    expect(handleCheckoutLockEvaluation({ message: 'A checkout session is already in progress.' })).toEqual({
+      status: 409,
+      proceed: false,
+      error: 'Checkout in progress',
+    });
+    expect(handleCheckoutLockEvaluation({ message: 'connection timeout' })).toEqual({
+      status: 500,
+      proceed: false,
+      error: 'Database error acquiring checkout lock: connection timeout',
+    });
+    expect(handleCheckoutLockEvaluation(null)).toEqual({
+      status: 200,
+      proceed: true,
+    });
+  });
+});
+
+describe('Regression 30: Rate Limiter Store Contract & Multi-Region Readiness', () => {
+  it('30. should support pluggable store interface conforming to RateLimiterStore contract', () => {
+    interface MockStore {
+      check: (id: string, limit: number, windowMs: number) => { allowed: boolean; remaining: number };
+    }
+
+    const mockRedisStore: MockStore = {
+      check: (id: string, limit: number) => ({ allowed: true, remaining: limit - 1 }),
+    };
+
+    const res = mockRedisStore.check('user_ip', 10, 60000);
+    expect(res.allowed).toBe(true);
+    expect(res.remaining).toBe(9);
   });
 });

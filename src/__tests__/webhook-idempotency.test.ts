@@ -158,17 +158,17 @@ describe('Stateful Stripe Webhook Idempotency & Financial Correctness Pipeline',
   });
 
   it('6. should fail closed with status 500 when completion update fails after business processing', () => {
-    function finalizeStripeEvent(rpcErr: Error | null, directErr: Error | null): { status: number } {
-      if (rpcErr && directErr) {
+    function finalizeStripeEvent(rpcErr: Error | null): { status: number } {
+      if (rpcErr) {
         // Must throw to fail closed and trigger Stripe retry
-        throw new Error(`Failed to record stripe event completion: ${directErr.message}`);
+        throw new Error(`Failed to record stripe event completion: ${rpcErr.message}`);
       }
       return { status: 200 };
     }
 
-    expect(() => finalizeStripeEvent(new Error('RPC failed'), new Error('DB connection lost')))
+    expect(() => finalizeStripeEvent(new Error('RPC failed')))
       .toThrow('Failed to record stripe event completion');
-    expect(finalizeStripeEvent(null, null).status).toBe(200);
+    expect(finalizeStripeEvent(null).status).toBe(200);
   });
 
   it('7. should protect concurrent in-flight re-processing for up to 300 seconds (5 minutes)', () => {
