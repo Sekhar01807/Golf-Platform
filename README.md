@@ -8,7 +8,7 @@ A full-stack SaaS platform connecting golf performance tracking with verified ch
 [![Zod](https://img.shields.io/badge/Zod-3.24.2-3068B7?style=flat-square&logo=zod&logoColor=white)](https://zod.dev/)
 [![Supabase](https://img.shields.io/badge/Supabase-PostgreSQL%20%2B%20RLS-3ECF8E?style=flat-square&logo=supabase&logoColor=white)](https://supabase.com/)
 [![Stripe](https://img.shields.io/badge/Stripe-Subscriptions%20%26%20Webhooks-635BFF?style=flat-square&logo=stripe&logoColor=white)](https://stripe.com/)
-[![Vitest](https://img.shields.io/badge/Vitest-100%20Tests%20Passing-6E9F18?style=flat-square&logo=vitest&logoColor=white)](https://vitest.dev/)
+[![Vitest](https://img.shields.io/badge/Vitest-102%20Tests%20Passing-6E9F18?style=flat-square&logo=vitest&logoColor=white)](https://vitest.dev/)
 
 ---
 
@@ -178,13 +178,14 @@ To prevent duplicate processing from network retries, the webhook handler implem
   - `processing` (< 300s old): Identified as in-flight; returns HTTP 200 OK to prevent race conditions.
   - `fresh / failed`: Claims execution lock, runs transaction, and transitions status to `completed` upon success or `failed` upon error.
 
-### 2. Row-Level Security & Atomic Database Procedures
-- **PostgreSQL Row-Level Security (RLS)**: Enforces tenant isolation so users can only read their own scorecards and profile data.
-- **Fail-Closed Stored Procedures (`SECURITY DEFINER`)**:
-  - `add_golf_score`: Serializes score submission with row-level locking (`FOR UPDATE`), enforces the 5-score FIFO limit, and validates bounds in a single transaction.
-  - `claim_checkout_lock`: Applies a 5-minute concurrency lock to prevent duplicate checkout sessions.
+### 2. Row-Level Security & Atomic Database Procedures (Fail-Closed Architecture)
+- **PostgreSQL Row-Level Security (RLS)**: Enforces zero-trust tenant isolation across all tables (`users`, `golf_scores`, `draw_entries`, `draw_winners`, `independent_donations`). Dashboard and user APIs operate purely under the authenticated user's session with zero `adminDb` fallback reads or writes.
+- **Strict Fail-Closed Transactional Procedures (`SECURITY DEFINER`)**:
+  - `add_golf_score`: Serializes score submission with row-level locking (`FOR UPDATE`), enforces the 5-score FIFO limit, and validates bounds in a single atomic transaction. Fails closed with zero non-transactional direct table fallback.
+  - `claim_checkout_lock`: Applies a 5-minute concurrency lock to prevent duplicate concurrent checkout sessions. Fails closed if lock acquisition fails.
   - `publish_draw_atomic`: Executes draw status updates, bulk winner insertion, rollover calculations, and audit logging within an atomic transaction.
   - `record_completed_donation`: Enforces unique payment constraint idempotency and updates charity ledgers securely.
+- **Zero Unsafe Fallback Guarantee**: Correctness and security guarantees originate from database transactions and triggers; failure of any atomic procedure immediately terminates the request rather than falling back to uncoordinated direct writes.
 
 ### 3. Application-Level Rate Limiting
 A sliding-window rate limiter protects sensitive endpoints against abuse:
@@ -229,7 +230,7 @@ Golf-Platform/
 │   │   ├── rate-limit.ts         # Sliding-window IP rate limiter
 │   │   ├── supabase.ts           # Supabase client & server initialization
 │   │   └── utils/                # Integer currency arithmetic & formatting
-│   └── __tests__/                # Vitest test suites (100 passing tests)
+│   └── __tests__/                # Vitest test suites (102 passing tests)
 ├── supabase/
 │   └── schema.sql                # Complete PostgreSQL schema, RLS, triggers & RPCs
 └── public/                       # Static assets & icons
@@ -337,26 +338,29 @@ erDiagram
 
 | Endpoint | Method | Authentication | Rate Limit | Description |
 | :--- | :--- | :--- | :--- | :--- |
-| `/api/checkout` | `POST` | User Session | 5 / min | Initiates Stripe Checkout session for subscription |
+| `/api/checkout` | `POST` | User Session | 5 / min | Initiates Stripe Checkout session for subscription (atomic lock) |
 | `/api/billing` | `POST` | User Session | 5 / min | Creates Stripe Customer Portal session |
 | `/api/donations` | `POST` | Public / User | 5 / min | Initiates direct donation checkout session |
+| `/api/profile` | `GET`, `POST` | User Session | 15 / min | Reads profile and updates user settings under RLS boundaries |
+| `/api/charity` | `POST` | User Session | 10 / min | Updates partner charity allocation preferences |
+| `/api/auth/password` | `POST` | User Session | 5 / min | Cryptographically verifies current password & updates credentials |
 | `/api/scores` | `GET` | User Session | Standard | Fetches member's 5-score history |
-| `/api/scores` | `POST` | User Session | 10 / min | Submits a new Stableford score (FIFO enforced) |
-| `/api/webhooks/stripe` | `POST` | Stripe Signature | Webhook | Handles asynchronous Stripe event notifications |
+| `/api/scores` | `POST` | User Session | 10 / min | Submits a new Stableford score (FIFO enforced via atomic RPC) |
+| `/api/webhooks/stripe` | `POST` | Stripe Signature | Webhook | Handles asynchronous Stripe event notifications with stateful claim |
 | `/api/admin/charities` | `GET`, `POST`, `PATCH`, `DELETE` | Admin Role | Standard | CRUD operations on partner charities |
 | `/api/admin/draws` | `GET`, `POST` | Admin Role | Standard | Simulates, publishes, or locks monthly draws |
 | `/api/admin/winners` | `GET`, `PATCH` | Admin Role | Standard | Reviews scorecard proofs and updates payout status |
-| `/api/admin/users` | `GET` | Admin Role | Standard | Lists member profiles and subscription statuses |
+| `/api/admin/users` | `GET`, `PATCH` | Admin Role | Standard | Lists member profiles and manages roles/subscriptions |
 
 ---
 
 ## Automated Testing
 
-The codebase includes an automated test suite executed with Vitest:
+The codebase includes an automated test suite executed with Vitest (102 tests):
 
 | Test Suite | File | Tests | Focus Area |
 | :--- | :--- | :--- | :--- |
-| Security Regression | `src/__tests__/security-regression.test.ts` | 30 | RLS boundaries, RPC locks, fail-closed guards |
+| Security Regression | `src/__tests__/security-regression.test.ts` | 32 | RLS boundaries, RPC locks, fail-closed guards |
 | Input Validation | `src/__tests__/validations.test.ts` | 24 | Zod schemas, boundary limits, sanitization |
 | Authorization | `src/__tests__/auth-security.test.ts` | 13 | Role verification, privilege escalation checks |
 | Draw Computation | `src/__tests__/draw.service.test.ts` | 12 | Prize pool splits, number generation, rollovers |
