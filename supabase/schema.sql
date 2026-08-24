@@ -80,7 +80,7 @@ CREATE TABLE IF NOT EXISTS public.charities (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- ═══════════════════════════════════════════════════
+-- -- ═══════════════════════════════════════════════════
 -- 3. USERS TABLE (public profile, linked to auth.users)
 -- ═══════════════════════════════════════════════════
 CREATE TABLE IF NOT EXISTS public.users (
