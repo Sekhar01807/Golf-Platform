@@ -215,9 +215,12 @@ Golf-Platform/
 │   │   ├── admin/                # Admin portal (charities, draws, winners, users)
 │   │   ├── api/                  # Backend REST route handlers
 │   │   │   ├── admin/            # Admin management APIs (charities, draws, winners)
+│   │   │   ├── auth/             # Credential & password management
 │   │   │   ├── billing/          # Stripe Customer Portal session handler
+│   │   │   ├── charity/          # User charity allocation preference updates
 │   │   │   ├── checkout/         # Stripe checkout session creation
 │   │   │   ├── donations/        # Direct charity donation checkout handler
+│   │   │   ├── profile/          # User profile read & update handlers
 │   │   │   ├── scores/           # Golf score submission (FIFO enforced)
 │   │   │   └── webhooks/stripe/  # Stateful idempotent webhook receiver
 │   │   ├── charities/            # Public charity directory & donation flow
@@ -226,10 +229,15 @@ Golf-Platform/
 │   │   └── layout.tsx            # Global layout with navigation & providers
 │   ├── components/               # Reusable UI components & modals
 │   ├── lib/                      # Business logic, utilities, and validation
+│   │   ├── auth/                 # Admin authorization & permission guards
+│   │   ├── services/             # Prize draw engine & audit log services
+│   │   ├── supabase/             # Supabase client, server & admin initializations
+│   │   ├── utils/                # Subscription helper functions & integer arithmetic
 │   │   ├── validations/          # Zod schemas & runtime type guards
+│   │   ├── email.ts              # Resend email client & dispatch templates
+│   │   ├── env.ts                # Environment variable parsing & verification
 │   │   ├── rate-limit.ts         # Sliding-window IP rate limiter
-│   │   ├── supabase.ts           # Supabase client & server initialization
-│   │   └── utils/                # Integer currency arithmetic & formatting
+│   │   └── stripe.ts             # Stripe SDK server initialization
 │   └── __tests__/                # Vitest test suites (102 passing tests)
 ├── supabase/
 │   └── schema.sql                # Complete PostgreSQL schema, RLS, triggers & RPCs
@@ -418,7 +426,7 @@ EMAIL_FROM=Golf Platform <notifications@golfforgood.org>
 
 ### Database Migration
 Execute the SQL migration file in your Supabase SQL Editor:
-- File: [`supabase/schema.sql`](file:///supabase/schema.sql)
+- File: [`supabase/schema.sql`](supabase/schema.sql)
 
 This provisions all required tables, triggers, indexes, and Row-Level Security policies.
 
