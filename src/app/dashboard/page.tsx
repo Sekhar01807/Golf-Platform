@@ -2,7 +2,7 @@ import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { getStripe } from '@/lib/stripe';
 import Link from 'next/link';
-import { ScorecardIcon, HeartIcon, TicketIcon, CrownIcon } from '@/components/Icons/Icons';
+import { ScorecardIcon, HeartIcon, TicketIcon, CrownIcon, CreditCardIcon } from '@/components/Icons/Icons';
 import { getMembershipDetails } from '@/lib/utils/subscription';
 import styles from './dashboard.module.css';
 
@@ -16,10 +16,11 @@ export const metadata = {
 export default async function DashboardOverview({
   searchParams,
 }: {
-  searchParams?: Promise<{ subscription?: string; session_id?: string }> | { subscription?: string; session_id?: string };
+  searchParams?: Promise<{ subscription?: string; session_id?: string; cancelled?: string }> | { subscription?: string; session_id?: string; cancelled?: string };
 }) {
   const resolvedParams = searchParams ? await Promise.resolve(searchParams) : undefined;
   const isSubscriptionSuccess = resolvedParams?.subscription === 'success';
+  const isCancelled = resolvedParams?.cancelled === 'true';
   const sessionId = resolvedParams?.session_id;
 
   const supabase = await createClient();
@@ -38,6 +39,13 @@ export default async function DashboardOverview({
   });
 
   if (user) {
+    if (isCancelled) {
+      // Clear checkout lock so user can retry anytime
+      try {
+        const adminDb = createAdminClient();
+        await adminDb.from('users').update({ checkout_lock_until: null }).eq('id', user.id);
+      } catch {}
+    }
     // If returning from checkout with success flag, ensure profile is actively synchronized immediately
     if (isSubscriptionSuccess) {
       try {
@@ -206,6 +214,27 @@ export default async function DashboardOverview({
         >
           <CrownIcon size={20} color="var(--color-success)" />
           <span>Welcome to GolfForGood Premium! Your membership is active. You can now log your Stableford rounds and participate in the monthly prize draws.</span>
+        </div>
+      )}
+
+      {isCancelled && (
+        <div
+          style={{
+            padding: '1rem 1.25rem',
+            backgroundColor: 'rgba(212, 168, 79, 0.12)',
+            border: '1px solid var(--color-accent)',
+            borderRadius: 'var(--radius-md)',
+            marginBottom: 'var(--space-xl)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.75rem',
+            color: 'var(--color-text-primary)',
+            fontSize: '0.95rem',
+            fontWeight: 500,
+          }}
+        >
+          <CreditCardIcon size={20} color="var(--color-accent)" />
+          <span>Checkout was cancelled. No charges were made. You can resume your subscription whenever you&apos;re ready.</span>
         </div>
       )}
 
