@@ -102,12 +102,19 @@ CREATE TABLE IF NOT EXISTS public.users (
 );
 
 -- Ensure all columns exist on pre-existing users table
-ALTER TABLE public.users ADD COLUMN IF NOT EXISTS checkout_lock_until TIMESTAMPTZ;
-ALTER TABLE public.users ADD COLUMN IF NOT EXISTS selected_charity_id UUID;
-ALTER TABLE public.users ADD COLUMN IF NOT EXISTS charity_contribution_percentage INTEGER NOT NULL DEFAULT 10;
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS full_name TEXT NOT NULL DEFAULT '';
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS role user_role NOT NULL DEFAULT 'user';
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS stripe_customer_id TEXT;
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS stripe_subscription_id TEXT;
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS subscription_status subscription_status NOT NULL DEFAULT 'inactive';
 ALTER TABLE public.users ADD COLUMN IF NOT EXISTS subscription_plan subscription_plan;
 ALTER TABLE public.users ADD COLUMN IF NOT EXISTS subscription_start_date TIMESTAMPTZ;
 ALTER TABLE public.users ADD COLUMN IF NOT EXISTS subscription_end_date TIMESTAMPTZ;
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS checkout_lock_until TIMESTAMPTZ;
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS selected_charity_id UUID;
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS charity_contribution_percentage INTEGER NOT NULL DEFAULT 10;
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT now();
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
 
 -- Ensure FK constraint exists
 DO $$ BEGIN
@@ -278,6 +285,55 @@ CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON public.audit_logs(created_a
 -- 11. SECURITY & TRANSACTIONAL FUNCTIONS / TRIGGERS
 -- ═══════════════════════════════════════════════════
 
+-- Helper: Safe & Comprehensive Service-Role Detection (Compatible with Supabase / PostgREST 9+)
+CREATE OR REPLACE FUNCTION public.is_service_role()
+RETURNS BOOLEAN AS $$
+DECLARE
+  v_role TEXT;
+  v_jwt TEXT;
+BEGIN
+  -- 1. Direct PostgreSQL role check
+  IF current_user IN ('service_role', 'postgres', 'supabase_admin') THEN
+    RETURN true;
+  END IF;
+
+  -- 2. PostgREST JSON claims header (Standard in Supabase / PostgREST 9+)
+  BEGIN
+    v_jwt := current_setting('request.jwt.claims', true);
+    IF v_jwt IS NOT NULL AND v_jwt != '' THEN
+      IF (v_jwt::jsonb ->> 'role') = 'service_role' THEN
+        RETURN true;
+      END IF;
+    END IF;
+  EXCEPTION WHEN OTHERS THEN
+    NULL;
+  END;
+
+  -- 3. Legacy PostgREST claim setting
+  BEGIN
+    v_role := current_setting('request.jwt.claim.role', true);
+    IF v_role = 'service_role' THEN
+      RETURN true;
+    END IF;
+  EXCEPTION WHEN OTHERS THEN
+    NULL;
+  END;
+
+  -- 4. Supabase auth.jwt() / auth.role() helper (if auth schema is active)
+  BEGIN
+    IF auth.role() = 'service_role' THEN
+      RETURN true;
+    END IF;
+  EXCEPTION WHEN OTHERS THEN
+    NULL;
+  END;
+
+  RETURN false;
+EXCEPTION WHEN OTHERS THEN
+  RETURN false;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
+
 -- A. Protect User Protected Columns from Self-Escalation
 CREATE OR REPLACE FUNCTION public.protect_user_fields()
 RETURNS TRIGGER AS $$
@@ -285,7 +341,7 @@ DECLARE
   caller_role user_role;
 BEGIN
   -- Service role / postgres superuser bypass
-  IF current_user = 'service_role' OR current_setting('request.jwt.claim.role', true) = 'service_role' THEN
+  IF public.is_service_role() THEN
     RETURN NEW;
   END IF;
 
@@ -337,7 +393,7 @@ DECLARE
   caller_role user_role;
 BEGIN
   -- Service role bypass
-  IF current_user = 'service_role' OR current_setting('request.jwt.claim.role', true) = 'service_role' THEN
+  IF public.is_service_role() THEN
     IF NEW.payout_status = 'paid' AND NEW.verification_status != 'approved' THEN
       RAISE EXCEPTION 'Cannot mark payout as paid unless verification status is approved.';
     END IF;
@@ -383,7 +439,7 @@ CREATE OR REPLACE FUNCTION public.protect_charity_contributions()
 RETURNS TRIGGER AS $$
 BEGIN
   -- Service role / internal RPC bypass
-  IF current_user = 'service_role' OR current_setting('request.jwt.claim.role', true) = 'service_role' THEN
+  IF public.is_service_role() THEN
     RETURN NEW;
   END IF;
 
@@ -448,7 +504,7 @@ BEGIN
   PERFORM id FROM public.users WHERE id = p_user_id FOR UPDATE;
 
   -- 2. Caller identity boundary: caller must be authenticated and match target user or have admin/service privileges
-  IF current_user != 'service_role' AND current_setting('request.jwt.claim.role', true) != 'service_role' THEN
+  IF NOT public.is_service_role() THEN
     IF auth.uid() IS NULL THEN
       RAISE EXCEPTION 'Authentication required.';
     END IF;
@@ -584,7 +640,7 @@ DECLARE
   v_donation_id UUID;
 BEGIN
   -- Verify caller identity: strictly restricted to service_role / webhook background execution
-  IF current_user != 'service_role' AND current_setting('request.jwt.claim.role', true) != 'service_role' THEN
+  IF NOT public.is_service_role() THEN
     RAISE EXCEPTION 'Unauthorized: record_completed_donation is restricted to service_role execution.';
   END IF;
 
@@ -626,7 +682,7 @@ DECLARE
   v_existing RECORD;
 BEGIN
   -- Verify caller identity: strictly restricted to service_role / webhook background execution
-  IF current_user != 'service_role' AND current_setting('request.jwt.claim.role', true) != 'service_role' THEN
+  IF NOT public.is_service_role() THEN
     RAISE EXCEPTION 'Unauthorized: claim_stripe_event is restricted to service_role execution.';
   END IF;
 
@@ -665,7 +721,7 @@ CREATE OR REPLACE FUNCTION public.complete_stripe_event(
 )
 RETURNS VOID AS $$
 BEGIN
-  IF current_user != 'service_role' AND current_setting('request.jwt.claim.role', true) != 'service_role' THEN
+  IF NOT public.is_service_role() THEN
     RAISE EXCEPTION 'Unauthorized: complete_stripe_event is restricted to service_role execution.';
   END IF;
 
@@ -681,7 +737,7 @@ CREATE OR REPLACE FUNCTION public.fail_stripe_event(
 )
 RETURNS VOID AS $$
 BEGIN
-  IF current_user != 'service_role' AND current_setting('request.jwt.claim.role', true) != 'service_role' THEN
+  IF NOT public.is_service_role() THEN
     RAISE EXCEPTION 'Unauthorized: fail_stripe_event is restricted to service_role execution.';
   END IF;
 
@@ -708,7 +764,10 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
 -- 13. EXPLICIT EXECUTION PRIVILEGE REVOCATIONS & GRANTS
 -- ═══════════════════════════════════════════════════
 
--- 1. Trigger functions: Internal trigger execution only
+-- 1. Trigger & internal helper functions
+REVOKE ALL ON FUNCTION public.is_service_role() FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.is_service_role() TO authenticated, service_role;
+
 REVOKE ALL ON FUNCTION public.handle_new_user() FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.handle_user_email_sync() FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.protect_user_fields() FROM PUBLIC, anon, authenticated;
