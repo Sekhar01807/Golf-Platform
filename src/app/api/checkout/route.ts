@@ -91,7 +91,7 @@ export async function POST(request: NextRequest) {
 
     // Fail closed if Stripe price ID is unconfigured or placeholder
     let priceId = getStripePriceId(plan);
-    const appUrl = getAppUrl();
+    const appUrl = getAppUrl(request);
 
     // If a product ID (prod_...) was provided, resolve its active price automatically
     if (priceId.startsWith('prod_')) {
@@ -107,7 +107,7 @@ export async function POST(request: NextRequest) {
       customer: customerId,
       mode: 'subscription',
       line_items: [{ price: priceId, quantity: 1 }],
-      success_url: `${appUrl}/dashboard?subscription=success`,
+      success_url: `${appUrl}/dashboard?subscription=success&session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${appUrl}/dashboard/subscription?cancelled=true`,
       metadata: {
         user_id: user.id,

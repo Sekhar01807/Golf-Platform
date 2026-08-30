@@ -3,7 +3,24 @@
  * Enforces fail-closed rules and strictly validates production environment settings.
  */
 
-export function getAppUrl(): string {
+export function getAppUrl(request?: Request | any): string {
+  if (request) {
+    try {
+      const origin = request.headers?.get?.('origin');
+      if (origin && typeof origin === 'string' && origin.startsWith('http')) {
+        return origin.replace(/\/$/, '');
+      }
+
+      const host = request.headers?.get?.('x-forwarded-host') || request.headers?.get?.('host');
+      const proto = request.headers?.get?.('x-forwarded-proto') || (request.nextUrl?.protocol ? request.nextUrl.protocol.replace(':', '') : 'http');
+      if (host) {
+        return `${proto}://${host}`.replace(/\/$/, '');
+      }
+    } catch {
+      // Fallback to env URL
+    }
+  }
+
   const url = process.env.NEXT_PUBLIC_APP_URL;
   if (!url) {
     if (process.env.NODE_ENV === 'production') {

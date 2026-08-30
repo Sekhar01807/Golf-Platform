@@ -28,7 +28,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'No active billing profile found. Please subscribe first.' }, { status: 404 });
     }
 
-    const appUrl = getAppUrl();
+    const appUrl = getAppUrl(request);
 
     const session = await stripe.billingPortal.sessions.create({
       customer: profile.stripe_customer_id,

@@ -1,4 +1,6 @@
 import { createClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/admin';
+import { getStripe } from '@/lib/stripe';
 import Link from 'next/link';
 import { ScorecardIcon, HeartIcon, TicketIcon, CrownIcon } from '@/components/Icons/Icons';
 import { getMembershipDetails } from '@/lib/utils/subscription';
@@ -14,10 +16,11 @@ export const metadata = {
 export default async function DashboardOverview({
   searchParams,
 }: {
-  searchParams?: Promise<{ subscription?: string }> | { subscription?: string };
+  searchParams?: Promise<{ subscription?: string; session_id?: string }> | { subscription?: string; session_id?: string };
 }) {
   const resolvedParams = searchParams ? await Promise.resolve(searchParams) : undefined;
   const isSubscriptionSuccess = resolvedParams?.subscription === 'success';
+  const sessionId = resolvedParams?.session_id;
 
   const supabase = await createClient();
   const {
@@ -35,6 +38,77 @@ export default async function DashboardOverview({
   });
 
   if (user) {
+    // If returning from checkout with success flag, ensure profile is actively synchronized immediately
+    if (isSubscriptionSuccess) {
+      try {
+        const adminDb = createAdminClient();
+        const stripe = getStripe();
+        let session = null;
+
+        if (sessionId) {
+          session = await stripe.checkout.sessions.retrieve(sessionId);
+        } else {
+          const { data: userRecord } = await adminDb
+            .from('users')
+            .select('stripe_customer_id')
+            .eq('id', user.id)
+            .single();
+
+          if (userRecord?.stripe_customer_id) {
+            const sessions = await stripe.checkout.sessions.list({
+              customer: userRecord.stripe_customer_id,
+              limit: 1,
+            });
+            if (sessions.data.length > 0) {
+              session = sessions.data[0];
+            }
+          }
+        }
+
+        if (session && (session.payment_status === 'paid' || session.status === 'complete')) {
+          const plan = (session.metadata?.plan === 'yearly' ? 'yearly' : 'monthly') as 'monthly' | 'yearly';
+          const customerId = typeof session.customer === 'string' ? session.customer : null;
+          const subscriptionId = typeof session.subscription === 'string' ? session.subscription : null;
+
+          let endDate: string | null = null;
+          let startDate: string = new Date().toISOString();
+
+          if (subscriptionId) {
+            try {
+              const subObj = await stripe.subscriptions.retrieve(subscriptionId);
+              if ((subObj as any).current_period_end) {
+                endDate = new Date((subObj as any).current_period_end * 1000).toISOString();
+              }
+              if ((subObj as any).current_period_start) {
+                startDate = new Date((subObj as any).current_period_start * 1000).toISOString();
+              }
+            } catch {
+              // Graceful fallback
+            }
+          }
+
+          if (!endDate) {
+            const defaultDays = plan === 'yearly' ? 365 : 30;
+            const d = new Date();
+            d.setDate(d.getDate() + defaultDays);
+            endDate = d.toISOString();
+          }
+
+          await adminDb.from('users').update({
+            stripe_customer_id: customerId,
+            stripe_subscription_id: subscriptionId,
+            subscription_status: 'active',
+            subscription_plan: plan,
+            subscription_start_date: startDate,
+            subscription_end_date: endDate,
+            checkout_lock_until: null,
+          }).eq('id', user.id);
+        }
+      } catch {
+        // Fallback to standard DB read
+      }
+    }
+
     // Fetch user profile with live subscription fields via authenticated user client
     const { data: profile } = await supabase
       .from('users')

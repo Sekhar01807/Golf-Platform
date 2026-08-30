@@ -36,7 +36,7 @@ export async function POST(request: NextRequest) {
     }
 
     const stripe = getStripe();
-    const appUrl = getAppUrl();
+    const appUrl = getAppUrl(request);
 
     // Create a one-off Stripe Checkout session
     const session = await stripe.checkout.sessions.create({
