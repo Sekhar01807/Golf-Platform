@@ -10,6 +10,10 @@ A full-stack SaaS platform connecting golf performance tracking with verified ch
 [![Stripe](https://img.shields.io/badge/Stripe-Subscriptions%20%26%20Webhooks-635BFF?style=flat-square&logo=stripe&logoColor=white)](https://stripe.com/)
 [![Vitest](https://img.shields.io/badge/Vitest-102%20Tests%20Passing-6E9F18?style=flat-square&logo=vitest&logoColor=white)](https://vitest.dev/)
 
+<p align="center">
+  <img src="public/Screenshot%202026-08-29%20193221.png" alt="GolfForGood Platform Banner" width="100%" />
+</p>
+
 ---
 
 ## Executive Summary
@@ -19,6 +23,79 @@ GolfForGood enables golfers to log their authentic 18-hole Stableford rounds, au
 The platform is designed with an emphasis on relational database integrity, idempotent financial transaction processing, rate limiting, and zero-trust security.
 
 > **Project Scope**: The monthly prize draws and winner payouts operate as a simulated mathematical demonstration. This application is an educational and portfolio engineering project and is not an operational commercial gambling or lottery service.
+
+---
+
+## Application Screenshots & Visual Tour
+
+### 1. Landing Page & Value Proposition
+Clean, purpose-driven landing page introducing golfers to philanthropic score tracking, transparent charity allocations, and monthly skill draws.
+
+<p align="center">
+  <img src="public/Screenshot%202026-08-29%20193221.png" alt="GolfForGood Landing Page Hero" width="95%" />
+</p>
+
+Four-step transparent workflow explaining the golfer journey from subscription to monthly jackpot draws:
+
+<p align="center">
+  <img src="public/Screenshot%202026-08-29%20193248.png" alt="How GolfForGood Works" width="95%" />
+</p>
+
+---
+
+### 2. Member Authentication & Onboarding
+Seamless registration and sign-in interfaces backed by Supabase Auth with zero-trust session management.
+
+| Member Registration (`/signup`) | Member Sign In (`/login`) |
+| :---: | :---: |
+| <img src="public/Screenshot%202026-08-29%20193349.png" alt="Join GolfForGood Registration" width="100%" /> | <img src="public/Screenshot%202026-08-29%20193315.png" alt="GolfForGood Sign In" width="100%" /> |
+
+---
+
+### 3. Member Portal & 5-Round Scoring Ledger
+Member dashboard overview and the Stableford score logging interface with automated 5-round FIFO history and scoring average calculation.
+
+#### Member Dashboard (`/dashboard`)
+Displays active subscription tier, 18-hole score entry counter (0/5 slots), monthly draw eligibility status, career prize winnings, and recent score history.
+
+<p align="center">
+  <img src="public/Screenshot%202026-08-29%20193442.png" alt="Member Dashboard Overview" width="95%" />
+</p>
+
+#### Stableford Score Ledger & 5-Round FIFO Pruning (`/dashboard/scores`)
+Members submit 18-hole scores (1–45 pts) and track their 5 active slots. Submitting a 6th round atomically removes the oldest record in PostgreSQL via transactional RPC.
+
+<p align="center">
+  <img src="public/Screenshot%202026-08-29%20193604.png" alt="Stableford Score Ledger" width="95%" />
+</p>
+
+---
+
+### 4. Subscription Management & Stripe Checkout
+Membership tier selection with flexible charity allocation options and hosted Stripe Checkout integration.
+
+#### Membership Tier Selection (`/dashboard/subscription`)
+Provides recurring Monthly (₹499/mo) and Annual Pass (₹4,999/yr) options with configurable charity contribution percentages.
+
+<p align="center">
+  <img src="public/Screenshot%202026-08-29%20193652.png" alt="Membership and Billing Plans" width="95%" />
+</p>
+
+#### Stripe Checkout Hosted Session
+Production-ready checkout session with Apple Pay, Link, and Card support, protected by 5-minute atomic lock claims (`claim_checkout_lock`).
+
+<p align="center">
+  <img src="public/Screenshot%202026-08-31%20000735.png" alt="Hosted Stripe Checkout" width="95%" />
+</p>
+
+---
+
+### 5. Profile & Privacy Settings (`/dashboard/profile`)
+Personal details management, leaderboard privacy visibility controls, and secure email credential updates.
+
+<p align="center">
+  <img src="public/Screenshot%202026-08-31%20002734.png" alt="Account Settings and Profile" width="95%" />
+</p>
 
 ---
 
@@ -37,6 +114,10 @@ The platform is designed with an emphasis on relational database integrity, idem
    - Webhook checks signature, claims event in `public.stripe_events`, activates the user profile (`subscription_status = 'active'`), and records charity allocation preferences.
    - Resend sends a subscription confirmation email.
 
+<p align="center">
+  <img src="public/Screenshot%202026-08-29%20193652.png" alt="Subscription Selection Flow" width="85%" />
+</p>
+
 ### 2. Golf Score Logging & 5-Round FIFO Pruning
 1. **Submission**:
    - Golfer logs round at `/dashboard`: score (1–45 Stableford points) and date played.
@@ -49,6 +130,10 @@ The platform is designed with an emphasis on relational database integrity, idem
    - The procedure locks the user row (`PERFORM ... FOR UPDATE`), counts existing scores in `public.golf_scores`, deletes the oldest record if 5 scores already exist, and inserts the new score in a single atomic transaction.
 4. **UI Update**:
    - The dashboard updates in real time, rendering the 5-round card and calculating the member's current scoring average.
+
+<p align="center">
+  <img src="public/Screenshot%202026-08-29%20193604.png" alt="Score Logging and FIFO History" width="85%" />
+</p>
 
 ### 3. Monthly Prize Draw Execution & Rollover
 1. **Eligibility Filter**:
